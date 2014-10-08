@@ -134,13 +134,12 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._decResponseViewer.setText(output)
         self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
 
-        if not self.initConfig(req, resp, blob):
-            self.paddingEncryptOutput("Unable to continue...")
+        if not self.initConfig(req, resp, blob, self.paddingDecryptOutput):
+            self.paddingDecryptOutput("Unable to continue...")
             return
 
         thread.start_new_thread(self.decryptMessage2, (req, resp, blob))
         return
-
 
     def paddingEncryptAttack(self, stuff):
         self.cancel = False
@@ -154,7 +153,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._encResponseViewer.setText(output)
         self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
 
-        if not self.initConfig(req, resp, blob):
+        if not self.initConfig(req, resp, blob, self.paddingEncryptOutput):
             #TODO still need to set stuff, maybe fail if auto
             self.paddingEncryptOutput("Blob is invalid... continuing anyway")
 
@@ -416,15 +415,16 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         return True
 
 
-    def initConfig(self, req, resp, blob, mode="cbc"):
+    def initConfig(self, req, resp, blob, errorOutput, mode="cbc"):
 
-        #TODO check there are only two markers
+        if req.count(u"\u00a7") != 2:
+            errorOutput("Error: needs 2 markers")
 
         #get encoding if set to auto, check for errors
         numEncodings = self._BlobEncodingTable.getRowCount()
 
         if not self.UICheckTableConfigError(self._BlobEncodingTable, numEncodings):
-            self.paddingDecryptOutput("Error: cannot select auto encodings as part of a chain")
+            errorOutput("Error: cannot select auto encodings as part of a chain")
             return False
         
         self.encoding = None
@@ -444,7 +444,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                         self.encoding.append("base64")
                 elif re.match(urlregex, blob):
                     self.encoding.append("url")
-            self.paddingDecryptOutput("Encoding is guessed as: " + self.encoding[0] + "\n")
+            errorOutput("Encoding is guessed as: " + self.encoding[0] + "\n")
         else:
             for i in range(0, numEncodings):
                 if self._BlobEncodingTable.getValueAt(i,0) == "ASCII Hex":
@@ -457,20 +457,20 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
 
         #TODO supress output if doing in a scan
         if len(self.encoding) == 0:
-            self.paddingDecryptOutput("Error: Encoding not set and could not be guessed")
+            errorOutput("Error: Encoding not set and could not be guessed")
             return False
 
         blob = self.decodeBlob(blob)
 
         #sanity check, blocklength is tested for more extensively/specifically below
         if len(blob) % 8 != 0:
-            self.paddingDecryptOutput("Error: Invalid blob length")
+            errorOutput("Error: Invalid blob length")
             return False
 
         #get CBC error conditions here
         numErrorChecks = self._CBCErrorTable.getRowCount()
         if not self.UICheckTableConfigError(self._CBCErrorTable, numErrorChecks):
-            self.paddingDecryptOutput("Error: cannot set Auto Error checking twice in one table")
+            errorOutput("Error: cannot set Auto Error checking twice in one table")
             return False
         self.cbcErrors = []
         if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)" and mode == "cbc":
@@ -482,7 +482,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                 checkValue = self._CBCErrorTable.getValueAt(i,1)
                 self.cbcErrors.append((checkType, checkValue))
                 if checkValue == "" or checkType == "":
-                    self.paddingDecryptOutput("Error: table value not set")
+                    errorOutput("Error: table value not set")
                     return False
 
 
@@ -499,14 +499,14 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                     self.blocksize = 8
                 else:
                     self.blocksize = 16
-            self.paddingDecryptOutput("Guessing block size of: " + str(self.blocksize) + "\n")
+            errorOutput("Guessing block size of: " + str(self.blocksize) + "\n")
         else:
             self.blocksize = int(self._blockSizeDropDown.getSelectedItem())/8
 
 
         print len(blob)
         if len(blob) % (self.blocksize) != 0:
-            self.paddingDecryptOutput("Error: Invalid blob length")
+            errorOutput("Error: Invalid blob length")
             return False
 
         #TODO make sure bytes are relatively random, if scanner then fail else warn
