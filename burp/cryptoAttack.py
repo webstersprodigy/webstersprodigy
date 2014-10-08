@@ -621,12 +621,17 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         addPadErrorButton = swing.JButton('Add Row', actionPerformed=self.UIAddPaddingRow)
         delPadErrorButton = swing.JButton('Delete Row', actionPerformed=self.UIDelPaddingRow)
 
-        self._jSeparator3 = swing.JSeparator()
+        _jSeparator3 = swing.JSeparator()
 
 
 
-        self._activeScanText = swing.JLabel()
-        self._activeScanText.setText("<html><h2>Active Scan Checks</h2><p>This will check for Crypto attacks using heuristics at all active scan insertion points</p></html>")
+        _activeScanText = swing.JLabel()
+        _activeScanText.setText("<html><h2>Active Scan Checks</h2><p>This will check for Crypto attacks using heuristics at all active scan insertion points</p></html>")
+
+        self.activeScanPaddingOracle = swing.JCheckBox('Padding Oracle')
+        self.activeScanPaddingOracle.setSelected(True)
+        self.activeScanECB = swing.JCheckBox('ECB')
+        self.activeScanECB.setSelected(True)
 
 
         #Position elements - x,y,width,height
@@ -651,6 +656,10 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._CBCErrorTablePane.setBounds(15, 545, 600, 150)
         addPadErrorButton.setBounds(640, 550, 95, 30)
         delPadErrorButton.setBounds(640, 585, 95, 30)
+        _jSeparator3.setBounds(15, 720, 1200, 5)
+        _activeScanText.setBounds(13, 720, 800, 80)
+        self.activeScanPaddingOracle.setBounds(15, 820, 150, 30)
+        self.activeScanECB.setBounds(180, 820, 200, 30)
 
 
         self._optionsTab = swing.JPanel()
@@ -678,6 +687,10 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._optionsTab.add(self._CBCErrorTablePane)
         self._optionsTab.add(addPadErrorButton)
         self._optionsTab.add(delPadErrorButton)
+        self._optionsTab.add(_jSeparator3)
+        self._optionsTab.add(_activeScanText)
+        self._optionsTab.add(self.activeScanPaddingOracle)
+        self._optionsTab.add(self.activeScanECB)
 
         self._optionsScrollPanel = swing.JScrollPane(self._optionsTab)
         self._optionsScrollPanel.setViewportView(self._optionsTab)
@@ -870,7 +883,6 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         return self._mainPane
         
 
-    
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         return
 
