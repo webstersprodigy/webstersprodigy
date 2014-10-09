@@ -81,18 +81,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 raise Exception("Unsupported format type: " + encoding)
         return [ord(ch) for ch in blob]
 
-    def decodeBlob2(self, blob):
-        for encoding in self.encoding:
-            if encoding == "hex":
-                blob = blob.decode("hex")
-            elif encoding == "base64":
-                blob = self._helpers.bytesToString(self._helpers.base64Decode(blob))
-            elif encoding == "url":
-                blob = self._helpers.bytesToString(self._helpers.urlDecode(blob))
-            else:
-                raise Exception("Unsupported format type: " + encoding)
-        return [ord(ch) for ch in blob]
-
     def encodeBlob(self, byteblob):
         blob = "".join([chr(a) for a in byteblob])
         for encoding in self.encoding:
@@ -175,6 +163,34 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         thread.start_new_thread(self.encryptMessage, (req, resp, plaintext))
         return
 
+    def ecbDecryptAttack(self, stuff):
+        self.cancel = False
+        self.initReqConfig()
+        initReq = self._helpers.bytesToString(self._ecbDecRequestViewer.getText())
+        blobstartindex, blobendindex = self.getBlobIndex(initReq)
+        initpayload = initReq[blobstartindex : blobendindex]
+        initResp = self._helpers.bytesToString(self.makeRequest(initReq, initpayload))
+
+        resp2 = self._helpers.bytesToString(self.makeRequest(initReq, "A" * 96))
+        blob = self.extractRepeatingBlock(initResp, resp2)
+        self.blocksize = self.ecbGetBlocksize(blob)
+
+        blocks = self.splitListToBlocks(blob)
+        """
+        blocks = []
+        tblock = []
+        for i in range(0, len(blob)):
+            tblock.append(blob[i])
+            if len(tblock) % self.blocksize == 0:
+                blocks.append(tblock)
+                tblock = []
+        print blocks
+        """
+        thread.start_new_thread(self.ecbDecrypt, (initReq, initResp, blocks))
+
+
+
+
     def paddingDecryptOutput(self, outStr):
         current = self._helpers.bytesToString(self._decResponseViewer.getText())
         self._decResponseViewer.setText(current + outStr)
@@ -182,6 +198,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def paddingEncryptOutput(self, outStr):
         current = self._helpers.bytesToString(self._encResponseViewer.getText())
         self._encResponseViewer.setText(current + outStr)
+
+    def ecbDecryptOutput(self, outstr):
+        current = self._helpers.bytesToString(self._ecbDecResponseViewer.getText())
+        self._ecbDecResponseViewer.setText(current + outStr)
 
     def prettyPrintSettings(self, blob):
         out =  "Host: " + self.host + "\n"
@@ -202,6 +222,86 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             i -=1
         return iv_block
         
+    def splitListToBlocks(self, blob):
+        blocks = []
+        tblock = []
+        for i in range(0, len(blob)):
+            tblock.append(blob[i])
+            if len(tblock) % self.blocksize == 0:
+                blocks.append(tblock)
+                tblock = []
+        return blocks
+
+    def getRepBlockCount(self, blocks):
+        for block in blocks:
+            c = blocks.count(block)
+            if c > 1:
+                return c
+
+    def ecbDecrypt(self, initRequest, initResponse, blocks, plaintextlen=96):
+        #by here I should have blocksize, etc
+
+        
+        numRepBlocks = self.getRepBlockCount(blocks)
+
+        #send one less byte until I align with a block
+        for i in range(plaintextlen-1, plaintextlen-33, -1):
+            resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * i))
+            blob = self.extractRepeatingBlock(initResponse, resp)
+            nblocks = self.splitListToBlocks(blob)
+            c = self.getRepBlockCount(nblocks)
+
+            if c < numRepBlocks:
+                plaintextlen = i + 1
+                break
+            blocks = nblocks[:]
+
+        #get lastRepeatedBlockIndex from blocks
+        lastRepeatedBlockIndex = None
+        blocksToDecrypt = []
+        for i in range (0, len(blocks)):
+            lastIndex = len(blocks)- 1 - blocks[::-1].index(blocks[i])
+            #if we are at our repeater block
+            if i != lastIndex:
+                lastRepeatedBlockIndex = lastIndex
+            else:
+                blocksToDecrypt.append((i, blocks[i][:]))
+
+        print "Blocks", blocks 
+        print "last index", lastRepeatedBlockIndex
+        #for each blockToDecrypt in blocksToDecrypt
+        #for each byte
+
+        tblocks = blocks[:]
+        #plaintextlen - 1
+
+
+        #
+        #build request with one less byte
+        resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * (plaintextlen - 1)))
+        blob = self.extractRepeatingBlock(initResponse, resp)
+        nblocks = self.splitListToBlocks(blob)
+        #matchblock = nblocks[lastRepeatedBlockIndex]
+        #TODO this could be sped up with freq analysis
+        for i in range(0,256):
+            print ".",
+            #TODO url encoding based on placement? idk
+            #TODO url encode with helpers doesn't work
+            #payload = self._helpers.urlEncode("A" * (plaintextlen - 1) + chr(i))
+            payload = urllib.quote("A" * (plaintextlen - 1) + chr(i))
+            print payload
+            resp = self._helpers.bytesToString(self.makeRequest(initRequest, payload ))
+            print resp
+            blob = self.extractRepeatingBlock(initResponse, resp)
+            print blob
+            tblocks = self.splitListToBlocks(blob)
+            if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
+                print "GOT IT!!!", chr(i)
+                break
+        print "done"
+
+        return
+
 
     def decryptMessage2(self, initRequest, initResponse, blob):
         self.paddingDecryptOutput("Beginning Attack...\n\n")
@@ -376,6 +476,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
 
+    def asyncECBReq(self, payload, nblocks, abc):
+        return
+
+
+
     #this is the more generic of the two (this and async) TODO, merge
     def asyncEncReq(self, initRequest, iv_block, c_block, initResponse, byte_val, i):
         blob = self.encodeBlob(iv_block + c_block)
@@ -444,10 +549,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return False
         return True
 
-    #mode is "cbcscan", "cbcattack"
-    #TODO output on decrypter doesn't work
-    def initConfig(self, req, blob, errorOutput=lambda x:None, mode="cbcattack"):
 
+    def initReqConfig(self):
         if self.host == None:
             self.host = self._hostOption.getText()
             if self.host == "":
@@ -461,6 +564,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return False
         if self.useHTTPS == None:
             self.useHTTPS = self.useHTTPSbutton.isSelected()
+
+    #mode is "cbcscan", "cbcattack"
+    #TODO output on decrypter doesn't work
+    def initConfig(self, req, blob, errorOutput=lambda x:None, mode="cbcattack"):
+
+        self.initReqConfig()
 
         if req.count(u"\u00a7") != 2 and mode == "cbcattack":
             errorOutput("Error: needs 2 markers")
@@ -588,6 +697,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             reqBody = message.getRequest()
             self._decRequestViewer.setText(reqBody)
             self._encRequestViewer.setText(reqBody)
+            self._ecbDecRequestViewer.setText(reqBody)
 
         except:
             print 'Failed to add data to scan tab.'
@@ -640,8 +750,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._ErrorDetectionHeading  = swing.JLabel()
         self._ErrorDetectionHeading.setText("<html><h2>CBC Padding Oracle Error Detection</h2><p>The Following are ANDed - if true, the response is considered a padding error</p></html>")
         self._CBCErrorTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)", ""]], ["Padding Error Detection", "Value"]))
-        #self._CBCErrorTable.getColumnModel().getColumn(1).setPreferredWidth(275)
-        #self._CBCErrorTable.getColumnModel().getColumn(2).setPreferredWidth(325)
         CBCErrorOptionsCombo = swing.JComboBox(self.paddingErrorDetectionOptions)
         self._CBCErrorTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(CBCErrorOptionsCombo))
         self._CBCErrorTablePane = JScrollPane(self._CBCErrorTable)
@@ -818,7 +926,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._ecbDecTab.setLeftComponent(ecbDecButtons)
         ecbDecAddMarkButton = swing.JButton(u"Add \u00a7", actionPerformed=self.UIecbDecAddPressed)
         ecbDecClearMarksButton = swing.JButton(u'Clear \u00a7', actionPerformed=self.UIecbDecClearPressed)
-        ecbDecAttackButton = swing.JButton("Attack", actionPerformed=self.cancelAttack) #TODO add here
+        ecbDecAttackButton = swing.JButton("Attack", actionPerformed=self.ecbDecryptAttack) 
         cancelAttackButton = swing.JButton("Stop", actionPerformed=self.cancelAttack)
     
 
@@ -837,8 +945,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         #output should include status, etc.
         self.ecbDecBodies.addTab("Output", self._ecbDecResponseViewer.getComponent())
         self._ecbDecTab.setRightComponent(self.ecbDecBodies)
-
-
 
         self._mainPane.addTab("ECB Decrypt", self._ecbDecTab)
 
@@ -1000,7 +1106,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             for blob in ecbRespBlobs:
                 if blob not in origRespBlobs and self.guessEncoding(blob):
                     blob = self.decodeBlob(blob)
-                    if self.repeating_block(blob) != -1:
+                    if self.ecbGetBlocksize(blob) != -1:
                         reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
                         #TODO highlight blob in response
                         reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
@@ -1030,19 +1136,36 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return True
 
     #TODO returns length of the block if it repeats, else returns -1
-    def repeating_block(self, block):
+    #TODO rename to something like ecbGetBlocksize
+    def ecbGetBlocksize(self, blob):
         datasplit = []
         elem = ""
-        for i in range(0,len(block)):
-            elem += chr(block[i])
+        for i in range(0,len(blob)):
+            elem += chr(blob[i])
             if len(elem) % 8 == 0:
                 datasplit.append(elem)
                 elem = ""
         for b in datasplit:
             if datasplit.count(b) > 1:
-                return 2 #TODO no, calculate length
+                return 16 #TODO no, calculate length - for now just do 16
         return -1
 
+
+    #Given a new response, reqturns the blob of enc(something | controlled | something)
+    #TODO needs to respect config options
+    #TODO use this in the scanner so only have to write once
+    def extractRepeatingBlock(self, initResp, newResp):
+        #todo {16} can be len(longblob) - should configure this better instead of hardcoding 96
+        blobRegex = r"[A-Za-z0-9+/=]{96}[A-Za-z0-9+/=]*"
+
+        origRespBlobs = re.findall(blobRegex, initResp)
+        ecbRespBlobs = re.findall(blobRegex, newResp)
+
+        for blob in ecbRespBlobs:
+            if blob not in origRespBlobs and self.guessEncoding(blob):
+                blob = self.decodeBlob(blob)
+                if self.ecbGetBlocksize(blob) != -1:
+                    return blob
 
 
 class CustomScanIssue(IScanIssue):
