@@ -72,6 +72,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def decodeBlob(self, blob):
         for encoding in self.encoding:
             if encoding == "hex":
+                #TODO remove this it's just error checking
                 blob = blob.decode("hex")
             elif encoding == "base64":
                 blob = self._helpers.bytesToString(self._helpers.base64Decode(blob))
@@ -270,6 +271,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         print "Blocks", blocks 
         print "last index", lastRepeatedBlockIndex
         #for each blockToDecrypt in blocksToDecrypt
+        self._ecbBlockPlaintext = ""
+        self._threadLimit = int(self.threadLimit.getText())
+        self._threadLimit_lock = thread.allocate_lock()
+        self._ecbByteDecrypted = False
         #for each byte
 
         tblocks = blocks[:]
@@ -283,21 +288,27 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         nblocks = self.splitListToBlocks(blob)
         #matchblock = nblocks[lastRepeatedBlockIndex]
         #TODO this could be sped up with freq analysis
+
+        
         for i in range(0,256):
+            while self._threadLimit <= 0:
+                    time.sleep(.1)
+            if self._ecbByteDecrypted:
+                break
+            self._threadLimit_lock.acquire()
+            self._threadLimit -= 1
+            self._threadLimit_lock.release()
+
             print ".",
             #TODO url encoding based on placement? idk
             #TODO url encode with helpers doesn't work
             #payload = self._helpers.urlEncode("A" * (plaintextlen - 1) + chr(i))
-            payload = urllib.quote("A" * (plaintextlen - 1) + chr(i))
-            print payload
-            resp = self._helpers.bytesToString(self.makeRequest(initRequest, payload ))
-            print resp
-            blob = self.extractRepeatingBlock(initResponse, resp)
-            print blob
-            tblocks = self.splitListToBlocks(blob)
-            if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
-                print "GOT IT!!!", chr(i)
-                break
+            payload = urllib.quote("A" * (plaintextlen - 1) + chr(i) + self._ecbBlockPlaintext)
+            thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
+
+        #wait for all threads to return
+        while self._threadLimit != int(self.threadLimit.getText()):
+            time.sleep(.1)
         print "done"
 
         return
@@ -476,7 +487,19 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
 
-    def asyncECBReq(self, payload, nblocks, abc):
+    def asyncECBReq(self, initRequest, initResponse, payload, nblocks, lastRepeatedBlockIndex, i):
+        resp = self._helpers.bytesToString(self.makeRequest(initRequest, payload ))
+        self._threadLimit_lock.acquire()
+        blob = self.extractRepeatingBlock(initResponse[:], resp[:])
+        tblocks = self.splitListToBlocks(blob)
+        
+        if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
+            print "GOT IT!!!", chr(i)
+            self._ecbBlockPlaintext = chr(i) + self._ecbBlockPlaintext
+            self._ecbByteDecrypted = True
+
+        self._threadLimit += 1
+        self._threadLimit_lock.release()
         return
 
 
