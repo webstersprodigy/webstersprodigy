@@ -127,7 +127,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         req = self._helpers.bytesToString(self._decRequestViewer.getText())
         blobstartindex, blobendindex = self.getBlobIndex(req)
         blob = req[blobstartindex : blobendindex]
-        
 
 
         if not self.initConfig(req, blob, self.paddingDecryptOutput, "cbcattack"):
@@ -137,8 +136,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         output = "Settings:\n"
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
-        self._decResponseViewer.setText(output)
+        #self._decResponseViewer.setText(output)
+        self.paddingDecryptOutput(output)
         self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
+
 
         #TODO can I get rid of this?
         resp = self.makeRequest(req, blob)
@@ -151,15 +152,17 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         plainstartindex, plainendindex = self.getBlobIndex(req)
         blob = req[plainstartindex : plainendindex]
         
-        output = "Settings:\n"
-        output += self.prettyPrintSettings(blob)
-        output += "\n\n"
-        self._encResponseViewer.setText(output)
-        self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
 
         if not self.initConfig(req, blob, self.paddingEncryptOutput, "cbcattack"):
             #TODO still need to set stuff, maybe fail if auto
             self.paddingEncryptOutput("Blob is invalid... continuing anyway")
+
+        output = "Settings:\n"
+        output += self.prettyPrintSettings(blob)
+        output += "\n\n"
+        #self._encResponseViewer.setText(output)
+        self.paddingEncryptOutput(output)
+        self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
 
         #TODO try/catch error and exit
         if self.plaintextisAsciiHex.isSelected():
@@ -201,7 +204,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
 
     def decryptMessage2(self, initRequest, initResponse, blob):
-        self.paddingDecryptOutput("Beginning Attack\n\n")
+        self.paddingDecryptOutput("Beginning Attack...\n\n")
         
         blob = self.decodeBlob(blob)
 
@@ -421,7 +424,28 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return True
 
 
+
+    def guessEncoding(self, blob):
+        self.encoding = []
+        try:
+            blob.decode("hex")
+            self.encoding.append("hex")
+        except TypeError:
+            pass
+        if len(self.encoding) == 0:
+            b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
+            urlregex = "^(%[\w]{2})+$"
+            if re.match(b64regex, blob):
+                if "=" in blob or "/" in blob or (re.match(".*[A-Z].*", blob) and re.match(".*[a-z].*", blob)):
+                    self.encoding.append("base64")
+            elif re.match(urlregex, blob):
+                self.encoding.append("url")
+            else:
+                return False
+        return True
+
     #mode is "cbcscan", "cbcattack"
+    #TODO output on decrypter doesn't work
     def initConfig(self, req, blob, errorOutput=lambda x:None, mode="cbcattack"):
 
         if self.host == None:
@@ -448,27 +472,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             errorOutput("Error: cannot select auto encodings as part of a chain")
             return False
         
-        self.encoding = None
-
+        self.encoding = []
         if numEncodings < 1 or (numEncodings == 1 and self._BlobEncodingTable.getValueAt(0,0) == "Auto (heuristics)"):
-            self.encoding = []
-            try:
-                blob.decode("hex")
-                self.encoding.append("hex")
-            except TypeError:
-                pass
-            if len(self.encoding) == 0:
-                b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
-                urlregex = "^(%[\w]{2})+$"
-                if re.match(b64regex, blob):
-                    if "=" in blob or "/" in blob or (re.match(".*[A-Z].*", blob) and re.match(".*[a-z].*", blob)):
-                        self.encoding.append("base64")
-                elif re.match(urlregex, blob):
-                    self.encoding.append("url")
-                else:
-                    errorOutput("Error: Encoding not set and could not be guessed\n")
-                    return False
-            errorOutput("Encoding is guessed as: " + self.encoding[0] + "\n")
+            if not self.guessEncoding(blob):
+                errorOutput("Error: Encoding not set and could not be guessed\n")
+                return False
+            else:
+                errorOutput("Encoding is guessed as: " + self.encoding[0] + "\n")
         else:
             for i in range(0, numEncodings):
                 if self._BlobEncodingTable.getValueAt(i,0) == "ASCII Hex":
@@ -905,6 +915,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         return
 
+
+    #todo - when both set the checks interfere with one another
     def doActiveScan(self, baseRequestResponse, insertionPoint):
         #TODO consult UI as to whether to check anything
         httpservice = baseRequestResponse.getHttpService()
@@ -917,59 +929,79 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         issues = []
+        reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
 
-        #######if padding oracle
-        if False:
-            blob = insertionPoint.getBaseValue()
-            if blob == "":
-                return None
+        if self.activeScanPaddingOracle.isSelected():
+            if self.detectPaddingOracle(baseRequestResponse, insertionPoint):
+                reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
 
-            #tmark is url encoding safe
-            tmark = "95f9c35e-8a5f-4ca8-b0a4-4b2907ce0675"
-            payload = tmark + blob + tmark
+                detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted."
+                issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "Padding Oracle",  detail, "Firm", "High")
+                issues.append(issue)
 
-            #req needs to be modified to our kludgy format because our attack doesn't have "insertionpoints"
-            req = insertionPoint.buildRequest(self._helpers.stringToBytes(payload))
-            req = self._helpers.bytesToString(req).replace(tmark, u"\u00a7")
-
-            if not self.initConfig(req, blob, sys.stdout.write, "cbcscan"):
-                return None
             
-            reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
-            reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
-
-            detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted."
-            issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "Padding Oracle",  detail, "Firm", "High")
-            issues.append(issue)
-
-            #self.detectPaddingOracle(baseRequestResponse, insertionPoint)
 
 
-        #######if ECB
-        #96 is enough for 3 256 bit blocks, and should repeat
-        origResp = self._helpers.bytesToString(baseRequestResponse.getResponse())
-        ecbReq = insertionPoint.buildRequest(self._helpers.stringToBytes("A" * 96))
-        #print ecbReq
-        ecbResp = self._helpers.bytesToString(self._callbacks.makeHttpRequest(httpservice, ecbReq).getResponse())
+        if self.activeScanECB.isSelected():
+            #96 is enough for 3 256 bit blocks, and should repeat
+            origResp = self._helpers.bytesToString(baseRequestResponse.getResponse())
+            ecbReq = insertionPoint.buildRequest(self._helpers.stringToBytes("A" * 96))
+            #print ecbReq
+            ecbResp = self._helpers.bytesToString(self._callbacks.makeHttpRequest(httpservice, ecbReq).getResponse())
 
-        blobRegex = r"[A-Za-z0-9+/=]{16}[A-Za-z0-9+/=]*"
+            #TODO add length check to skip (if ecbResp not longer than origResp)
 
-        origRespBlobs = re.findall(blobRegex, origResp)
-        ecbRespBlobs = re.findall(blobRegex, ecbResp)
+            blobRegex = r"[A-Za-z0-9+/=]{16}[A-Za-z0-9+/=]*"
 
-        for blob in ecbRespBlobs:
-            if blob not in origRespBlobs:
-                print "Blob: ", blob
+            origRespBlobs = re.findall(blobRegex, origResp)
+            ecbRespBlobs = re.findall(blobRegex, ecbResp)
+
+            for blob in ecbRespBlobs:
+                if blob not in origRespBlobs and self.guessEncoding(blob):
+                    blob = self.decodeBlob(blob)
+                    if self.repeating_block(blob) != -1:
+                        reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
+                        #TODO highlight blob in response
+                        reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
+                        detail = "The application appears to encrypt attacker controlled text with ECB. Anything else encrypted with this key is decryptable/encryptable."
+                        issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "ECB with Attacker input",  detail, "Firm", "High")
+                        issues.append(issue)
+
 
         return issues
 
-    #def detectPaddingOracle(self, baseRequestResponse, insertionPoint):
+    def detectPaddingOracle(self, baseRequestResponse, insertionPoint):
+        #TODO add 256 requests and make sure
+        blob = insertionPoint.getBaseValue()
+        if blob == "":
+            return False
 
-    def detectECBScan(self, reqresp, insertionPoint):
-        #1. make a request with a long repeating block
+        #tmark is url encoding safe
+        tmark = "95f9c35e-8a5f-4ca8-b0a4-4b2907ce0675"
+        payload = tmark + blob + tmark
 
-        #2. for everything matching a regex in the response 1) check it wasn't in the initial request and 2) initConfig (or at least decode blob) then 3) see if there's a repeating block
-        return
+        #req needs to be modified to our kludgy format because our attack doesn't have "insertionpoints"
+        req = insertionPoint.buildRequest(self._helpers.stringToBytes(payload))
+        req = self._helpers.bytesToString(req).replace(tmark, u"\u00a7")
+
+        if not self.initConfig(req, blob, sys.stdout.write, "cbcscan"):
+            return False
+        return True
+
+    #TODO returns length of the block if it repeats, else returns -1
+    def repeating_block(self, block):
+        datasplit = []
+        elem = ""
+        for i in range(0,len(block)):
+            elem += chr(block[i])
+            if len(elem) % 8 == 0:
+                datasplit.append(elem)
+                elem = ""
+        for b in datasplit:
+            if datasplit.count(b) > 1:
+                return 2 #TODO no, calculate length
+        return -1
+
 
 
 class CustomScanIssue(IScanIssue):
