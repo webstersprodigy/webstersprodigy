@@ -274,41 +274,45 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._ecbBlockPlaintext = ""
         self._threadLimit = int(self.threadLimit.getText())
         self._threadLimit_lock = thread.allocate_lock()
-        self._ecbByteDecrypted = False
-        #for each byte
-
-        tblocks = blocks[:]
-        #plaintextlen - 1
-
-
-        #
-        #build request with one less byte
-        resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * (plaintextlen - 1)))
-        blob = self.extractRepeatingBlock(initResponse, resp)
-        nblocks = self.splitListToBlocks(blob)
-        #matchblock = nblocks[lastRepeatedBlockIndex]
-        #TODO this could be sped up with freq analysis
-
         
-        for i in range(0,256):
-            while self._threadLimit <= 0:
-                    time.sleep(.1)
-            if self._ecbByteDecrypted:
+        
+        reqlen = plaintextlen
+        for byte in range(0, self.blocksize):
+            if self.cancel:
                 break
-            self._threadLimit_lock.acquire()
-            self._threadLimit -= 1
-            self._threadLimit_lock.release()
+
+            tblocks = blocks[:]
+            #plaintextlen - 1
+            reqlen -= 1
+
+            #build request with one less byte
+            resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * reqlen))
+            blob = self.extractRepeatingBlock(initResponse, resp)
+            nblocks = self.splitListToBlocks(blob)
+            #matchblock = nblocks[lastRepeatedBlockIndex]
+            #TODO this could be sped up with freq analysis
 
             print ".",
-            #TODO url encoding based on placement? idk
-            #TODO url encode with helpers doesn't work
-            #payload = self._helpers.urlEncode("A" * (plaintextlen - 1) + chr(i))
-            payload = urllib.quote("A" * (plaintextlen - 1) + chr(i) + self._ecbBlockPlaintext)
-            thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
+            self._ecbByteDecrypted = False
+            for i in range(0,256):
+                while self._threadLimit <= 0:
+                        time.sleep(.1)
+                if self._ecbByteDecrypted:
+                    break
+                self._threadLimit_lock.acquire()
+                self._threadLimit -= 1
+                self._threadLimit_lock.release()
 
-        #wait for all threads to return
-        while self._threadLimit != int(self.threadLimit.getText()):
-            time.sleep(.1)
+                
+                #TODO url encoding based on placement? idk
+                #TODO url encode with helpers doesn't work
+                #payload = self._helpers.urlEncode("A" * (plaintextlen - 1) + chr(i))
+                payload = urllib.quote("A" * reqlen + self._ecbBlockPlaintext + chr(i))
+                thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
+
+            #wait for all threads to return
+            while self._threadLimit != int(self.threadLimit.getText()):
+                time.sleep(.1)
         print "done"
 
         return
@@ -495,7 +499,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
         if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
             print "GOT IT!!!", chr(i)
-            self._ecbBlockPlaintext = chr(i) + self._ecbBlockPlaintext
+            self._ecbBlockPlaintext += chr(i)
             self._ecbByteDecrypted = True
 
         self._threadLimit += 1
