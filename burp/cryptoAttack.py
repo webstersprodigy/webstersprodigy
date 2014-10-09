@@ -808,6 +808,41 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._encryptTab.setRightComponent(self.encryptBodies)
 
         self._mainPane.addTab("CBC Encrypt", self._encryptTab)
+
+
+        ### ECB Decrypt Tab ###
+        self._ecbDecTab = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+
+        ecbDecButtons = swing.JPanel()
+        ecbDecButtons.setLayout(FlowLayout(FlowLayout.LEADING, 5, 10))
+        self._ecbDecTab.setLeftComponent(ecbDecButtons)
+        ecbDecAddMarkButton = swing.JButton(u"Add \u00a7", actionPerformed=self.UIecbDecAddPressed)
+        ecbDecClearMarksButton = swing.JButton(u'Clear \u00a7', actionPerformed=self.UIecbDecClearPressed)
+        ecbDecAttackButton = swing.JButton("Attack", actionPerformed=self.cancelAttack) #TODO add here
+        cancelAttackButton = swing.JButton("Stop", actionPerformed=self.cancelAttack)
+    
+
+        ecbDecButtons.add(ecbDecAddMarkButton)
+        ecbDecButtons.add(ecbDecClearMarksButton)
+        ecbDecButtons.add(ecbDecAttackButton)
+        ecbDecButtons.add(cancelAttackButton)
+
+
+        self.ecbDecBodies = JTabbedPane()
+        self._ecbDecRequestViewer = self._callbacks.createTextEditor()
+        self._ecbDecResponseViewer = self._callbacks.createTextEditor()
+        self._ecbDecResponseViewer.setEditable(False)
+        self.ecbDecBodies.addTab("Request", self._ecbDecRequestViewer.getComponent())
+
+        #output should include status, etc.
+        self.ecbDecBodies.addTab("Output", self._ecbDecResponseViewer.getComponent())
+        self._ecbDecTab.setRightComponent(self.ecbDecBodies)
+
+
+
+        self._mainPane.addTab("ECB Decrypt", self._ecbDecTab)
+
+
         
         subPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
         reqPane = JPanel()
@@ -836,6 +871,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def UICbcEncClearPressed(self, stuff):
         self.UIclearMarkers(self._encRequestViewer)
+
+    def UIecbDecAddPressed(self, stuff):
+        self.UIaddMarker(self._ecbDecRequestViewer)
+
+    def UIecbDecClearPressed(self, stuff):
+        self.UIclearMarkers(self._ecbDecRequestViewer)
 
     def UIaddMarker(self, component):
         selectedBounds = component.getSelectionBounds()
