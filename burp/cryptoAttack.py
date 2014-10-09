@@ -3,6 +3,8 @@ from burp import ITab
 from burp import IHttpListener
 from burp import IMessageEditorController
 from burp import IContextMenuFactory
+from burp import IScannerCheck
+from burp import IScanIssue
 from java import awt
 from java.awt import Component;
 from java.io import PrintWriter;
@@ -26,9 +28,9 @@ import time
 import re
 import urllib
 import base64
+import sys
 
-
-class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController, IContextMenuFactory):
+class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory, IScannerCheck):
 
     def testMode(self):
         self._CBCErrorTable.setValueAt("Response Status is", 0,0)
@@ -111,15 +113,13 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
 
     #TODO make number of tries configurable and add it here
     def makeRequest(self, origReq, cryptoBlob):
-        host = self._hostOption.getText()
-        port = int(self._miscPort.getText())
-        useHTTPS = self.useHTTPS.isSelected()
+
 
         blobstartindex, blobendindex = self.getBlobIndex(origReq)
         
         newReq = origReq[:blobstartindex-1] + cryptoBlob + origReq[blobendindex +1:]
         newReq = self._helpers.stringToBytes(newReq)
-        resp = self._callbacks.makeHttpRequest(host, port, useHTTPS, newReq)
+        resp = self._callbacks.makeHttpRequest(self.host, self.port, self.useHTTPS, newReq)
         return resp
 
     def paddingDecryptAttack(self, stuff):
@@ -127,17 +127,21 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         req = self._helpers.bytesToString(self._decRequestViewer.getText())
         blobstartindex, blobendindex = self.getBlobIndex(req)
         blob = req[blobstartindex : blobendindex]
-        resp = self.makeRequest(req, blob)
+        
+
+
+        if not self.initConfig(req, blob, self.paddingDecryptOutput, "cbcattack"):
+            self.paddingDecryptOutput("Unable to continue...")
+            return
+
         output = "Settings:\n"
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
         self._decResponseViewer.setText(output)
         self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
 
-        if not self.initConfig(req, resp, blob, self.paddingDecryptOutput):
-            self.paddingDecryptOutput("Unable to continue...")
-            return
-
+        #TODO can I get rid of this?
+        resp = self.makeRequest(req, blob)
         thread.start_new_thread(self.decryptMessage2, (req, resp, blob))
         return
 
@@ -146,14 +150,14 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         req = self._helpers.bytesToString(self._encRequestViewer.getText())
         plainstartindex, plainendindex = self.getBlobIndex(req)
         blob = req[plainstartindex : plainendindex]
-        resp = self.makeRequest(req, "")
+        
         output = "Settings:\n"
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
         self._encResponseViewer.setText(output)
         self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
 
-        if not self.initConfig(req, resp, blob, self.paddingEncryptOutput):
+        if not self.initConfig(req, blob, self.paddingEncryptOutput, "cbcattack"):
             #TODO still need to set stuff, maybe fail if auto
             self.paddingEncryptOutput("Blob is invalid... continuing anyway")
 
@@ -163,6 +167,8 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         else:
             plaintext = self.plaintextField.getText()
 
+        #can I get rid of this TODO
+        resp = self.makeRequest(req, "")
         thread.start_new_thread(self.encryptMessage, (req, resp, plaintext))
         return
 
@@ -175,11 +181,12 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._encResponseViewer.setText(current + outStr)
 
     def prettyPrintSettings(self, blob):
-        out =  "Host: " + self._hostOption.getText() + "\n"
-        out += "Port: " + self._miscPort.getText() + "\n"
-        out += "SSL: " + repr(self.useHTTPS.isSelected()) + "\n"
+        out =  "Host: " + self.host + "\n"
+        out += "Port: " + str(self.port) + "\n"
+        out += "SSL: " + repr(self.useHTTPS) + "\n"
+        #TODO get this value for real
         out += "Threads: " + self.threadLimit.getText() + "\n"
-        out += "Block size: " + self._blockSizeDropDown.getSelectedItem() + "\n"
+        out += "Block size: " + str(self.blocksize) + "\n"
         out += "Initial Blob: " + blob
         return out
 
@@ -344,7 +351,6 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                         time.sleep(.1)
 
                     if not self._foundIntermediate:
-                        print "HEREHERE"
                         if retry == 0:
                             #this might look kludgy, but seems to take care of cases that occur about ~1/256th of the time
                             iv_block[bytenum-1] ^= 0x0f
@@ -415,9 +421,24 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         return True
 
 
-    def initConfig(self, req, resp, blob, errorOutput, mode="cbc"):
+    #mode is "cbcscan", "cbcattack"
+    def initConfig(self, req, blob, errorOutput=lambda x:None, mode="cbcattack"):
 
-        if req.count(u"\u00a7") != 2:
+        if self.host == None:
+            self.host = self._hostOption.getText()
+            if self.host == "":
+                errorOutput("Error: Unable to get port")
+                return False
+        if self.port == None:
+            try:
+                self.port = int(self._miscPort.getText())
+            except ValueError:
+                errorOutput("Error: Unable to get port")
+                return False
+        if self.useHTTPS == None:
+            self.useHTTPS = self.useHTTPSbutton.isSelected()
+
+        if req.count(u"\u00a7") != 2 and mode == "cbcattack":
             errorOutput("Error: needs 2 markers")
 
         #get encoding if set to auto, check for errors
@@ -436,7 +457,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                 self.encoding.append("hex")
             except TypeError:
                 pass
-            if self.encoding == None:
+            if len(self.encoding) == 0:
                 b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
                 urlregex = "^(%[\w]{2})+$"
                 if re.match(b64regex, blob):
@@ -444,6 +465,9 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                         self.encoding.append("base64")
                 elif re.match(urlregex, blob):
                     self.encoding.append("url")
+                else:
+                    errorOutput("Error: Encoding not set and could not be guessed\n")
+                    return False
             errorOutput("Encoding is guessed as: " + self.encoding[0] + "\n")
         else:
             for i in range(0, numEncodings):
@@ -453,12 +477,6 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                     self.encoding.append("base64")
                 elif self._BlobEncodingTable.getValueAt(i,0) == "URL Encoding":
                     self.encoding.append("url")
-
-
-        #TODO supress output if doing in a scan
-        if len(self.encoding) == 0:
-            errorOutput("Error: Encoding not set and could not be guessed")
-            return False
 
         blob = self.decodeBlob(blob)
 
@@ -473,8 +491,9 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
             errorOutput("Error: cannot set Auto Error checking twice in one table")
             return False
         self.cbcErrors = []
-        if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)" and mode == "cbc":
-            self.getCBCErrorConditions(req, resp, blob, "cbc")
+
+        if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)" and "cbc" in mode:
+            self.getCBCErrorConditions(req, blob, "cbc")
         else:
             numErrorChecks = self._CBCErrorTable.getRowCount()
             for error in range(0, numErrorChecks):
@@ -485,17 +504,16 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
                     errorOutput("Error: table value not set")
                     return False
 
-
         #CBC blocklength check
         #will only detect 128 and 64 bits, Rizzo algorithm
         if self._blockSizeDropDown.getSelectedItem() == "Auto (heuristics)":
+            self.blocksize = 1
             if len(blob) % 16 == 8:
                 self.blocksize = 8
             elif len(blob) >= 16:
                 tBlob = self.encodeBlob([0x2]*8 + blob[-16:])
-                print tBlob
                 tResp = self.makeRequest(req, tBlob)
-                if not self.isPaddingError(tResp, resp):
+                if not self.isPaddingError(tResp):
                     self.blocksize = 8
                 else:
                     self.blocksize = 16
@@ -504,7 +522,6 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
             self.blocksize = int(self._blockSizeDropDown.getSelectedItem())/8
 
 
-        print len(blob)
         if len(blob) % (self.blocksize) != 0:
             errorOutput("Error: Invalid blob length")
             return False
@@ -512,15 +529,15 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         #TODO make sure bytes are relatively random, if scanner then fail else warn
         return True
      
-    def getCBCErrorConditions(self, req, resp, blob, mode):
+
+    def getCBCErrorConditions(self, req, blob, mode):
         #flip the last byte, see if it's an error
         #tblob = blob[:]
         #tblob[-1] = tblob[-1] ^ 1
         #tResp = self.makeRequest(req, tBlob)
 
-        #TODO make this better, 256 req is probably ok
-        #print type(tResp)
         self.cbcErrors.append(("Contains String", "padding error"))
+        #TODO add something about flipping last byte has different error than first
 
 
 
@@ -552,7 +569,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
             self._hostOption.setText(service.getHost())
             self._miscPort.setText(str(service.getPort()))
             if service.getProtocol() == "https":
-                self.useHTTPS.setSelected(True)
+                self.useHTTPSbutton.setSelected(True)
 
 
 
@@ -587,7 +604,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._miscPortText = swing.JLabel()
         self._miscPortText.setText("Port:")
         self._miscPort = swing.JTextField()
-        self.useHTTPS = swing.JCheckBox('Use HTTPS')
+        self.useHTTPSbutton = swing.JCheckBox('Use HTTPS')
         self.noIV = swing.JCheckBox('no IV (CBC Decrypt only)')
         self.noIV.setSelected(True)
         self._threadLimitText = swing.JLabel()
@@ -640,7 +657,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._hostOption.setBounds(95, 50, 250, 30)
         self._miscPortText.setBounds(15, 95, 60, 30)
         self._miscPort.setBounds(95, 95, 75, 30)
-        self.useHTTPS.setBounds(200, 95, 125, 30)
+        self.useHTTPSbutton.setBounds(200, 95, 125, 30)
         self.noIV.setBounds(200, 140, 225, 30)
         self._threadLimitText.setBounds(15, 140, 60, 30)
         self.threadLimit.setBounds(95, 140, 75, 30)
@@ -671,7 +688,7 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._optionsTab.add(self._hostOptionText)
         self._optionsTab.add(self._miscPortText)
         self._optionsTab.add(self._miscPort)
-        self._optionsTab.add(self.useHTTPS)
+        self._optionsTab.add(self.useHTTPSbutton)
         self._optionsTab.add(self.noIV)
         self._optionsTab.add(self._threadLimitText)
         self._optionsTab.add(self.threadLimit)
@@ -865,16 +882,18 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
         self._helpers = callbacks.getHelpers()
         callbacks.setExtensionName("Crypto Attacks")
         
+        self.port =None
+        self.host = None
+        self.useHTTPS = None
+
         self.addUI()
 
-        # register ourselves as an HTTP listener
-        callbacks.registerHttpListener(self)
         callbacks.registerContextMenuFactory(self)
+        callbacks.registerScannerCheck(self)
 
 
         return
         
-
     
     def getTabCaption(self):
         return "Crypto Attacker"
@@ -886,3 +905,114 @@ class BurpExtender(IBurpExtender, ITab, IHttpListener, IMessageEditorController,
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         return
 
+    def doActiveScan(self, baseRequestResponse, insertionPoint):
+        #TODO consult UI as to whether to check anything
+        httpservice = baseRequestResponse.getHttpService()
+        self.port = httpservice.getPort()
+        self.host = httpservice.getHost()
+        if httpservice.getProtocol() == "https":
+            self.useHTTPS = True
+        else:
+            self.useHTTPS = False
+
+
+        issues = []
+
+        #######if padding oracle
+        if False:
+            blob = insertionPoint.getBaseValue()
+            if blob == "":
+                return None
+
+            #tmark is url encoding safe
+            tmark = "95f9c35e-8a5f-4ca8-b0a4-4b2907ce0675"
+            payload = tmark + blob + tmark
+
+            #req needs to be modified to our kludgy format because our attack doesn't have "insertionpoints"
+            req = insertionPoint.buildRequest(self._helpers.stringToBytes(payload))
+            req = self._helpers.bytesToString(req).replace(tmark, u"\u00a7")
+
+            if not self.initConfig(req, blob, sys.stdout.write, "cbcscan"):
+                return None
+            
+            reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
+            reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
+
+            detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted."
+            issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "Padding Oracle",  detail, "Firm", "High")
+            issues.append(issue)
+
+            #self.detectPaddingOracle(baseRequestResponse, insertionPoint)
+
+
+        #######if ECB
+        #96 is enough for 3 256 bit blocks, and should repeat
+        origResp = self._helpers.bytesToString(baseRequestResponse.getResponse())
+        ecbReq = insertionPoint.buildRequest(self._helpers.stringToBytes("A" * 96))
+        #print ecbReq
+        ecbResp = self._helpers.bytesToString(self._callbacks.makeHttpRequest(httpservice, ecbReq).getResponse())
+
+        blobRegex = r"[A-Za-z0-9+/=]{16}[A-Za-z0-9+/=]*"
+
+        origRespBlobs = re.findall(blobRegex, origResp)
+        ecbRespBlobs = re.findall(blobRegex, ecbResp)
+
+        for blob in ecbRespBlobs:
+            if blob not in origRespBlobs:
+                print "Blob: ", blob
+
+        return issues
+
+    #def detectPaddingOracle(self, baseRequestResponse, insertionPoint):
+
+    def detectECBScan(self, reqresp, insertionPoint):
+        #1. make a request with a long repeating block
+
+        #2. for everything matching a regex in the response 1) check it wasn't in the initial request and 2) initConfig (or at least decode blob) then 3) see if there's a repeating block
+        return
+
+
+class CustomScanIssue(IScanIssue):
+    def __init__(self, httpService, url, httpMessages, name, detail, confidence, severity):
+        self.HttpService = httpService
+        self.Url = url
+        self.HttpMessages = httpMessages
+        self.Name = name
+        self.Detail = detail + '<br/><br/><div style="font-size:8px">This issue was reported by CryptoAttacker</div>'
+        self.Severity = severity
+        self.Confidence = confidence
+        print "Reported: "+name+" on "+str(url)
+        return
+    
+    def getUrl(self):
+        return self.Url
+     
+    def getIssueName(self):
+        return self.Name
+    
+    def getIssueType(self):
+        return 0
+    
+    def getSeverity(self):
+        return self.Severity
+    
+    def getConfidence(self):
+        return self.Confidence
+    
+    def getIssueBackground(self):
+        return None
+    
+    def getRemediationBackground(self):
+        return None
+    
+    def getIssueDetail(self):
+        return self.Detail
+    
+    def getRemediationDetail(self):
+        return None
+
+    def getHttpMessages(self):
+        return self.HttpMessages
+    
+    def getHttpService(self):
+        return self.HttpService
