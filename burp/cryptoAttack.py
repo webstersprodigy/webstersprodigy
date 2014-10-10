@@ -103,7 +103,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     #TODO make number of tries configurable and add it here
     def makeRequest(self, origReq, cryptoBlob):
 
-
         blobstartindex, blobendindex = self.getBlobIndex(origReq)
         
         newReq = origReq[:blobstartindex-1] + cryptoBlob + origReq[blobendindex +1:]
@@ -177,16 +176,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.blocksize = self.ecbGetBlocksize(blob)
 
         blocks = self.splitListToBlocks(blob)
-        """
-        blocks = []
-        tblock = []
-        for i in range(0, len(blob)):
-            tblock.append(blob[i])
-            if len(tblock) % self.blocksize == 0:
-                blocks.append(tblock)
-                tblock = []
-        print blocks
-        """
+
+        self.ecbDecBodies.setSelectedComponent(self._ecbDecResponseViewer.getComponent())
+        output = "Settings:\n"
+        output += self.prettyPrintSettings(initpayload)
+        output += "\n\n"
+        self.ecbDecryptOutput(output)
+
         thread.start_new_thread(self.ecbDecrypt, (initReq, initResp, blocks))
 
 
@@ -200,7 +196,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         current = self._helpers.bytesToString(self._encResponseViewer.getText())
         self._encResponseViewer.setText(current + outStr)
 
-    def ecbDecryptOutput(self, outstr):
+    def ecbDecryptOutput(self, outStr):
         current = self._helpers.bytesToString(self._ecbDecResponseViewer.getText())
         self._ecbDecResponseViewer.setText(current + outStr)
 
@@ -268,8 +264,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             else:
                 blocksToDecrypt.append((i, blocks[i][:]))
 
-        print "Blocks", blocks 
-        print "last index", lastRepeatedBlockIndex
         #for each blockToDecrypt in blocksToDecrypt
         self._ecbBlockPlaintext = ""
         self._threadLimit = int(self.threadLimit.getText())
@@ -278,7 +272,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
         reqlen = plaintextlen
 
-        for block in range(lastRepeatedBlockIndex, len(blocks)):
+
+        for block in range(lastRepeatedBlockIndex+1, len(blocks)):
             for byte in range(0, self.blocksize):
                 if self.cancel:
                     break
@@ -294,7 +289,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #matchblock = nblocks[lastRepeatedBlockIndex]
                 #TODO this could be sped up with freq analysis
 
-                print ".",
                 self._ecbByteDecrypted = False
                 for i in range(0,256):
                     while self._threadLimit <= 0:
@@ -315,7 +309,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #wait for all threads to return
                 while self._threadLimit != int(self.threadLimit.getText()):
                     time.sleep(.1)
-        print "done"
+        self.ecbDecryptOutput("\n\nDone")
 
         return
 
@@ -500,7 +494,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         tblocks = self.splitListToBlocks(blob)
         
         if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
-            print "GOT IT!!!", chr(i)
+            self.ecbDecryptOutput(chr(i))
+            #print "GOT IT!!!", chr(i), hex(i)
             self._ecbBlockPlaintext += chr(i)
             self._ecbByteDecrypted = True
 
@@ -758,7 +753,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._threadLimitText = swing.JLabel()
         self._threadLimitText.setText("Threads:")
         self.threadLimit = swing.JTextField()
-        self.threadLimit.setText("64")
+        self.threadLimit.setText("30")
 
         self._blockSizeText = swing.JLabel()
         self._blockSizeText.setText("Blocksize:")
