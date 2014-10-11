@@ -544,6 +544,26 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._threadLimit += 1
         lock.release()
 
+    """
+    def asyncCBCScanCheck(self, initRequest, iv_block, c_block, initResponse, byte_val, i):
+        blob = self.encodeBlob(iv_block + c_block)
+        tResp = self.makeRequest(initRequest, blob)
+        self._threadLimit_lock.acquire()
+        if not self.isPaddingError(tResp, initResponse):
+            #if this is the end of the block there could be issues (e.g. \x02\x02 would have valid padding)
+            if byte_val == self.blocksize-1:
+                iv_block[byte_val-1] ^= 1
+                blob2 = self.encodeBlob(iv_block + c_block)
+                tResp2 = self.makeRequest(initRequest, blob)
+                if self.isPaddingError(tResp, initResponse):
+                    self._threadLimit += 1
+                    self._threadLimit_lock.release()
+                    return
+            self._foundIntermediate = True
+            self.intermediate[byte_val] = (self.blocksize - byte_val) ^ i
+        self._threadLimit += 1
+        self._threadLimit_lock.release()
+    """
 
     def UICheckTableConfigError(self, tableobj, numEncodings):
         for i in range(1, numEncodings):
@@ -635,7 +655,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.cbcErrors = []
 
         if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)" and "cbc" in mode:
-            self.getCBCErrorConditions(req, blob, "cbc")
+            if not self.guessCBCErrorCheck(req, blob, errorOutput):
+                errorOutput("Error: cannot auto detect padding error")
+                return False
         else:
             numErrorChecks = self._CBCErrorTable.getRowCount()
             for error in range(0, numErrorChecks):
@@ -672,14 +694,45 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return True
      
 
-    def getCBCErrorConditions(self, req, blob, mode):
-        #flip the last byte, see if it's an error
-        #tblob = blob[:]
-        #tblob[-1] = tblob[-1] ^ 1
-        #tResp = self.makeRequest(req, tBlob)
+    #uses three requests to guess what errors look like
+    #TODO threading
+    def guessCBCErrorCheck(self, req, blob, output=lambda x:None):
 
-        self.cbcErrors.append(("Contains String", "padding error"))
-        #TODO add something about flipping last byte has different error than first
+        goodResp = self.makeRequest(req, self.encodeBlob(blob))
+        #flip the last byte, see if it's an error
+        tblob = blob[:]
+        #33 is bigger than the biggest blocksize, and should produce a padding error
+        tblob[-1] ^= 33
+        padErrorResp = self.makeRequest(req, self.encodeBlob(tblob))
+        tblob = blob[:]
+        #attempt to mess up the block but not cause a padding error
+        if len(blob) > 32:
+            tblob[-33] ^= 33
+        else:
+            tblob[0] ^= 1
+        controlResp = self.makeRequest(req, self.encodeBlob(tblob))
+
+        goodStatus = self._helpers.analyzeResponse(goodResp).getStatusCode()
+        padErrorStatus = self._helpers.analyzeResponse(padErrorResp).getStatusCode()
+        controlStatus = self._helpers.analyzeResponse(controlResp).getStatusCode()
+
+        if padErrorStatus != goodStatus and padErrorStatus != controlStatus:
+            #status is padErrorStatus
+            self.cbcErrors.append(("Response Status is", str(padErrorStatus)))
+            output("Guessed Padding Error: status == " + str(padErrorStatus) + "\n")
+            return True
+
+        keywords = ["error", "padding error"]
+
+        for word in keywords:
+            if word in padErrorResp.lower() and word not in goodResp.lower() and word not in controlResp.lower():
+                self.cbcErrors.append(("Contains String", word))    
+                output("Guessed Padding Error: contains string == " + word + "\n")
+                return True
+
+        #TODO play with others - response length a lot bigger or a lot smaller? etc.
+        return False
+
 
 
 
@@ -1105,7 +1158,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if self.detectPaddingOracle(baseRequestResponse, insertionPoint):
                 reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
 
-                detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted."
+                detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted. This might indicate a padding error: <br />,br />"
+                detail += self.cbcErrors[0][0] + " " + self.cbcErrors[0][1]
                 issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "Padding Oracle",  detail, "Firm", "High")
                 issues.append(issue)
 
