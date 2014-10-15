@@ -1,34 +1,27 @@
-from burp import IBurpExtender
-from burp import ITab
-from burp import IHttpListener
-from burp import IMessageEditorController
-from burp import IContextMenuFactory
-from burp import IScannerCheck
-from burp import IScanIssue
-from java import awt
-from java.awt import Component;
-from java.io import PrintWriter;
-from java.util import ArrayList;
-from java.util import List;
-from javax import swing
-from javax.swing import JScrollPane;
-from javax.swing import JSplitPane;
-from javax.swing import JTabbedPane;
-from javax.swing import JTable;
-from javax.swing import JPanel;
-from javax.swing import SwingUtilities;
-from java.awt import FlowLayout;
-from java.awt import GridLayout;
-from javax.swing import BoxLayout;
+
+# Author: James Kettle <james.kettle@contextis.co.uk>
+# Copyright 2014 Context Information Security
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+from java import awt;
+from javax import swing;
 from javax.swing.table import AbstractTableModel;
-from threading import Lock
-import binascii
-import thread
-import time
-import re
-import urllib
-import base64
-import sys
+import binascii, thread, time, re, urllib, base64, sys
+from burp import IBurpExtender, ITab, IHttpListener, IMessageEditorController, IContextMenuFactory, IScannerCheck, IScanIssue
+
+
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory, IScannerCheck):
 
@@ -544,33 +537,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._threadLimit += 1
         lock.release()
 
-    """
-    def asyncCBCScanCheck(self, initRequest, iv_block, c_block, initResponse, byte_val, i):
-        blob = self.encodeBlob(iv_block + c_block)
-        tResp = self.makeRequest(initRequest, blob)
-        self._threadLimit_lock.acquire()
-        if not self.isPaddingError(tResp, initResponse):
-            #if this is the end of the block there could be issues (e.g. \x02\x02 would have valid padding)
-            if byte_val == self.blocksize-1:
-                iv_block[byte_val-1] ^= 1
-                blob2 = self.encodeBlob(iv_block + c_block)
-                tResp2 = self.makeRequest(initRequest, blob)
-                if self.isPaddingError(tResp, initResponse):
-                    self._threadLimit += 1
-                    self._threadLimit_lock.release()
-                    return
-            self._foundIntermediate = True
-            self.intermediate[byte_val] = (self.blocksize - byte_val) ^ i
-        self._threadLimit += 1
-        self._threadLimit_lock.release()
-    """
 
     def UICheckTableConfigError(self, tableobj, numEncodings):
         for i in range(1, numEncodings):
             if tableobj.getValueAt(i,0) == "Auto (heuristics)":
                 return False
         return True
-
 
 
     def guessEncoding(self, blob):
@@ -787,7 +759,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                                "Not Contains Regex", "Response Length > ", "Response Length <"]
 
         ### main split pane ###
-        self._mainPane = JTabbedPane()
+        self._mainPane = swing.JTabbedPane()
 
         #should mostly be able to copy this https://www.codewatch.org/blog/?p=402
 
@@ -818,7 +790,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._BlobEncodingTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)"]], ["Blob Encoding"]))
         ecodingOptionsCombo = swing.JComboBox(self.encodingTypeOptions)
         self._BlobEncodingTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(ecodingOptionsCombo))
-        self._blobTablePane = JScrollPane(self._BlobEncodingTable)
+        self._blobTablePane = swing.JScrollPane(self._BlobEncodingTable)
         addEncodingButton = swing.JButton('Add Row', actionPerformed=self.UIAddEncodingRow)
         delEncodingButton = swing.JButton('Delete Row', actionPerformed=self.UIDelEncodingRow)
         self._jSeparator2 = swing.JSeparator()
@@ -828,7 +800,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._CBCErrorTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)", ""]], ["Padding Error Detection", "Value"]))
         CBCErrorOptionsCombo = swing.JComboBox(self.paddingErrorDetectionOptions)
         self._CBCErrorTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(CBCErrorOptionsCombo))
-        self._CBCErrorTablePane = JScrollPane(self._CBCErrorTable)
+        self._CBCErrorTablePane = swing.JScrollPane(self._CBCErrorTable)
         addPadErrorButton = swing.JButton('Add Row', actionPerformed=self.UIAddPaddingRow)
         delPadErrorButton = swing.JButton('Delete Row', actionPerformed=self.UIDelPaddingRow)
 
@@ -912,10 +884,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         ### Decrypt Padding Oracle Tab ###
-        self._decryptTab = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        self._decryptTab = swing.JSplitPane(swing.JSplitPane.VERTICAL_SPLIT)
 
         decryptButtons = swing.JPanel()
-        decryptButtons.setLayout(FlowLayout(FlowLayout.LEADING, 5, 10))
+        decryptButtons.setLayout(awt.FlowLayout(awt.FlowLayout.LEADING, 5, 10))
         self._decryptTab.setLeftComponent(decryptButtons)
         decryptAddMarkButton = swing.JButton(u"Add \u00a7", actionPerformed=self.UICbcDecAddPressed)
         decryptClearMarksButton = swing.JButton(u'Clear \u00a7', actionPerformed=self.UICbcDecClearPressed)
@@ -929,7 +901,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         decryptButtons.add(cancelAttackButton)
 
 
-        self.decryptBodies = JTabbedPane()
+        self.decryptBodies = swing.JTabbedPane()
         self._decRequestViewer = self._callbacks.createTextEditor()
         self._decResponseViewer = self._callbacks.createTextEditor()
         self._decResponseViewer.setEditable(False)
@@ -945,15 +917,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         ### Encrypt Padding Oracle Tab ###
-        self._encryptTab = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        self._encryptTab = swing.JSplitPane(swing.JSplitPane.VERTICAL_SPLIT)
 
         encryptButtons = swing.JPanel()
         toprow = swing.JPanel()
         botrow = swing.JPanel()
-        encryptButtons.setLayout(BoxLayout(encryptButtons, BoxLayout.Y_AXIS))
+        encryptButtons.setLayout(swing.BoxLayout(encryptButtons, swing.BoxLayout.Y_AXIS))
 
-        toprow.setLayout(FlowLayout(FlowLayout.LEADING, 5, 10))
-        botrow.setLayout(FlowLayout(FlowLayout.LEADING, 5, 10))
+        toprow.setLayout(awt.FlowLayout(awt.FlowLayout.LEADING, 5, 10))
+        botrow.setLayout(awt.FlowLayout(awt.FlowLayout.LEADING, 5, 10))
         
         
         encryptAddMarkButton = swing.JButton(u"Add \u00a7", actionPerformed=self.UICbcEncAddPressed)
@@ -981,7 +953,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._encryptTab.setLeftComponent(encryptButtons)
 
 
-        self.encryptBodies = JTabbedPane()
+        self.encryptBodies = swing.JTabbedPane()
         self._encRequestViewer = self._callbacks.createTextEditor()
         self._encResponseViewer = self._callbacks.createTextEditor()
         self._encResponseViewer.setEditable(False)
@@ -995,10 +967,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         ### ECB Decrypt Tab ###
-        self._ecbDecTab = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        self._ecbDecTab = swing.JSplitPane(swing.JSplitPane.VERTICAL_SPLIT)
 
         ecbDecButtons = swing.JPanel()
-        ecbDecButtons.setLayout(FlowLayout(FlowLayout.LEADING, 5, 10))
+        ecbDecButtons.setLayout(awt.FlowLayout(awt.FlowLayout.LEADING, 5, 10))
         self._ecbDecTab.setLeftComponent(ecbDecButtons)
         ecbDecAddMarkButton = swing.JButton(u"Add \u00a7", actionPerformed=self.UIecbDecAddPressed)
         ecbDecClearMarksButton = swing.JButton(u'Clear \u00a7', actionPerformed=self.UIecbDecClearPressed)
@@ -1012,7 +984,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         ecbDecButtons.add(cancelAttackButton)
 
 
-        self.ecbDecBodies = JTabbedPane()
+        self.ecbDecBodies = swing.JTabbedPane()
         self._ecbDecRequestViewer = self._callbacks.createTextEditor()
         self._ecbDecResponseViewer = self._callbacks.createTextEditor()
         self._ecbDecResponseViewer.setEditable(False)
@@ -1026,8 +998,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         
-        subPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT)
-        reqPane = JPanel()
+        subPane = swing.JSplitPane(swing.JSplitPane.HORIZONTAL_SPLIT)
+        reqPane = swing.JPanel()
         reqEditor = self._callbacks.createTextEditor()
         stupid = self._callbacks.createTextEditor()
         subPane.setRightComponent(stupid.getComponent())
