@@ -1,6 +1,5 @@
 
-# Author: James Kettle <james.kettle@contextis.co.uk>
-# Copyright 2014 Context Information Security
+# Author: Rich LUndeen
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
