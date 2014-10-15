@@ -1128,7 +1128,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return issues
 
     def detectPaddingOracle(self, baseRequestResponse, insertionPoint):
-        #TODO add 256 requests and make sure
+        #TODO add 256 requests and make sure?
         blob = insertionPoint.getBaseValue()
         if blob == "":
             return False
