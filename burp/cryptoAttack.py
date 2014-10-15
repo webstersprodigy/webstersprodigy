@@ -65,7 +65,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def decodeBlob(self, blob):
         for encoding in self.encoding:
             if encoding == "hex":
-                #TODO remove this it's just error checking
                 blob = blob.decode("hex")
             elif encoding == "base64":
                 blob = self._helpers.bytesToString(self._helpers.base64Decode(blob))
@@ -117,7 +116,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         output = "Settings:\n"
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
-        #self._decResponseViewer.setText(output)
         self.paddingDecryptOutput(output)
         self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
 
@@ -179,8 +177,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         thread.start_new_thread(self.ecbDecrypt, (initReq, initResp, blocks))
 
 
-
-
     def paddingDecryptOutput(self, outStr):
         current = self._helpers.bytesToString(self._decResponseViewer.getText())
         self._decResponseViewer.setText(current + outStr)
@@ -197,7 +193,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         out =  "Host: " + self.host + "\n"
         out += "Port: " + str(self.port) + "\n"
         out += "SSL: " + repr(self.useHTTPS) + "\n"
-        #TODO get this value for real
         out += "Threads: " + self.threadLimit.getText() + "\n"
         out += "Block size: " + str(self.blocksize) + "\n"
         out += "Initial Blob: " + blob
@@ -229,9 +224,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return c
 
     def ecbDecrypt(self, initRequest, initResponse, blocks, plaintextlen=96):
-        #by here I should have blocksize, etc
-
-        
+        #by here I should have all config values (e.g. blocksize, etc.)
         numRepBlocks = self.getRepBlockCount(blocks)
 
         #send one less byte until I align with a block
@@ -265,21 +258,17 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
         reqlen = plaintextlen
 
-
         for block in range(lastRepeatedBlockIndex+1, len(blocks)):
             for byte in range(0, self.blocksize):
                 if self.cancel:
                     break
 
                 tblocks = blocks[:]
-                #plaintextlen - 1
                 reqlen -= 1
-
                 #build request with one less byte
                 resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * reqlen))
                 blob = self.extractRepeatingBlock(initResponse, resp)
                 nblocks = self.splitListToBlocks(blob)
-                #matchblock = nblocks[lastRepeatedBlockIndex]
                 #TODO this could be sped up with freq analysis
 
                 self._ecbByteDecrypted = False
@@ -292,9 +281,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     self._threadLimit -= 1
                     self._threadLimit_lock.release()
 
-                    
-                    #TODO url encoding based on placement? idk
-                    #TODO url encode with helpers doesn't work
+                    #TODO url encode with helpers doesn't work - bug with Java burp helper
                     #payload = self._helpers.urlEncode("A" * (plaintextlen - 1) + chr(i))
                     payload = urllib.quote("A" * reqlen + self._ecbBlockPlaintext + chr(i))
                     thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
@@ -356,7 +343,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         iv_block[bytenum] = i
                         blob = self.encodeBlob(iv_block[:] + encryptedBlob[block][:])
 
-                        thread.start_new_thread(self.asyncEncReq, (initRequest, iv_block[:], encryptedBlob[block][:], initResponse, bytenum, i))
+                        thread.start_new_thread(self.asyncReq, (initRequest, iv_block[:], encryptedBlob[block][:], initResponse, bytenum, i))
 
                     #wait for all threads to return
                     while self._threadLimit != int(self.threadLimit.getText()):
@@ -415,8 +402,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
     def encryptMessage(self, initRequest, initResponse, plaintext): 
-        #self.blocksize = int(self._blockSizeDropDown.getSelectedItem())/8
-        self.paddingEncryptOutput("Beginning Attack\n\n")
+        self.paddingEncryptOutput("Beginning Attack...\n\n")
 
         plaintext = self.split_toblocks(self.pkcs7_pad(plaintext))
 
@@ -451,7 +437,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         iv_block[bytenum] = i
                         blob = self.encodeBlob(iv_block[:] + encryptedBlob[block+1][:])
 
-                        thread.start_new_thread(self.asyncEncReq, (initRequest, iv_block[:], encryptedBlob[block+1][:], initResponse, bytenum, i))
+                        thread.start_new_thread(self.asyncReq, (initRequest, iv_block[:], encryptedBlob[block+1][:], initResponse, bytenum, i))
 
                     #wait for all threads to return
                     while self._threadLimit != int(self.threadLimit.getText()):
@@ -488,7 +474,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
         if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
             self.ecbDecryptOutput(chr(i))
-            #print "GOT IT!!!", chr(i), hex(i)
             self._ecbBlockPlaintext += chr(i)
             self._ecbByteDecrypted = True
 
@@ -496,9 +481,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._threadLimit_lock.release()
         return
 
-
-    #this is the more generic of the two (this and async) TODO, merge
-    def asyncEncReq(self, initRequest, iv_block, c_block, initResponse, byte_val, i):
+    def asyncReq(self, initRequest, iv_block, c_block, initResponse, byte_val, i):
         blob = self.encodeBlob(iv_block + c_block)
         tResp = self.makeRequest(initRequest, blob)
         self._threadLimit_lock.acquire()
@@ -516,34 +499,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.intermediate[byte_val] = (self.blocksize - byte_val) ^ i
         self._threadLimit += 1
         self._threadLimit_lock.release()
-        
-    def asyncReq(self, initRequest, initResponse, blob, lock, byte_val, dec_byte, iv):
-        tResp = self.makeRequest(initRequest, blob)
-        lock.acquire()
-        if not self.isPaddingError(tResp, initResponse):
-            self.paddingDecryptOutput("BLOB: " + blob + "")
-            #if this is the end of the block there could be issues
-            #TODO add if statement to check that it's the end of the block second request is unnecessary if this works
-            ##if dec_byte == self.blocksize -1:
-            ##    blob[dec_byte-1] ^= 1
-            ##tResp2 = self.makeRequest(initRequest, blob)
-            ##if not self.isPaddingError(tResp2, initResponse):
-            self._decryptByte = True
-            _intermediate = (self.blocksize - dec_byte) ^ byte_val
-            self.paddingDecryptOutput(".")
-            self.paddingDecryptOutput("decrypted byte:" + hex(_intermediate ^ iv[dec_byte]) + "\n")
-            self.plaintext.insert(0, (_intermediate ^ (iv[dec_byte])))
-            self._intermediate.append(_intermediate)
-        self._threadLimit += 1
-        lock.release()
-
 
     def UICheckTableConfigError(self, tableobj, numEncodings):
         for i in range(1, numEncodings):
             if tableobj.getValueAt(i,0) == "Auto (heuristics)":
                 return False
         return True
-
 
     def guessEncoding(self, blob):
         self.encoding = []
