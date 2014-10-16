@@ -529,7 +529,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if self.host == None:
             self.host = self._hostOption.getText()
             if self.host == "":
-                errorOutput("Error: Unable to get port")
+                errorOutput("Error: Unable to get host")
                 return False
         if self.port == None:
             try:
