@@ -114,6 +114,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         if not self.initConfig(req, blob, self.paddingDecryptOutput, "cbcattack"):
             self.paddingDecryptOutput("Unable to continue...")
+            self.attackInProgress = False
             return
 
         output = "Settings:\n"
@@ -128,8 +129,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def paddingEncryptAttack(self, stuff):
         if self.attackInProgress:
-            self.paddingDecryptOutput("Error: attack already in progress.\n")
-            self.paddingDecryptOutput("Stopping all attacks\n")
+            self.paddingEncryptOutput("Error: attack already in progress.\n")
+            self.paddingEncryptOutput("Stopping all attacks\n")
             self.attackInProgress = False
             return
         self.attackInProgress = True
@@ -143,6 +144,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 self.paddingEncryptOutput("Blob is invalid... continuing anyway with config settings...\n")
             else:
                 self.paddingEncryptOutput("Blob is invalid... cannot auto config values without a blob...\n")
+                self.attackInProgress = False
                 return
 
         output = "Settings:\n"
@@ -156,6 +158,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 plaintext = self.plaintextField.getText().decode("hex")
             except:
                 self.paddingEncryptOutput("Error: could not decode ascii hex as input...\n")
+                self.attackInProgress = False
                 return
         else:
             plaintext = self.plaintextField.getText()
@@ -166,8 +169,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def ecbDecryptAttack(self, stuff):
         if self.attackInProgress:
-            self.paddingDecryptOutput("Error: attack already in progress.\n")
-            self.paddingDecryptOutput("Stopping all attacks\n")
+            self.ecbDecryptOutput("Error: attack already in progress.\n")
+            self.ecbDecryptOutput("Stopping all attacks\n")
             self.attackInProgress = False
             return
         self.attackInProgress = True
@@ -190,6 +193,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.ecbDecryptOutput(output)
 
         thread.start_new_thread(self.ecbDecrypt, (initReq, initResp, blocks))
+        return
 
 
     def paddingDecryptOutput(self, outStr):
@@ -298,6 +302,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     time.sleep(.1)
         self.ecbDecryptOutput("\n\nDone")
 
+        self.attackInProgress = False
         return
 
 
@@ -384,6 +389,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.paddingDecryptOutput("\n\nPlaintext (hex): " + fBlob.encode("hex") + "\n")
         self.paddingDecryptOutput("Plaintext: " + repr(fBlob) + "\n")
 
+        self.attackInProgress = False
+        return
 
     
     def pkcs7_pad(self, mstr):
@@ -475,6 +482,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         fBlob = "".join([self.encodeBlob(block[:]) for block in encryptedBlob])
         self.paddingEncryptOutput("\nFinal Blob: " + fBlob)
+
+        self.attackInProgress = False
+        return
 
 
 
