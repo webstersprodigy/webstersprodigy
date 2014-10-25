@@ -1080,7 +1080,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         callbacks.registerContextMenuFactory(self)
         callbacks.registerScannerCheck(self)
 
-
         return
         
     
@@ -1111,7 +1110,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if self.detectPaddingOracle(baseRequestResponse, insertionPoint):
                 reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
 
-                detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted. This might indicate a padding error: <br />,br />"
+                detail = "The application appears to have a padding oracle. This parameter can be arbitrarily encrypted/decrypted. This might indicate a padding error under the following conditions: <br /><br />"
                 detail += self.cbcErrors[0][0] + " " + self.cbcErrors[0][1]
                 issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "Padding Oracle",  detail, "Firm", "High")
                 issues.append(issue)
@@ -1142,7 +1141,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             #TODO highlight blob in response
 
                             reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
-                            detail = "The application appears to encrypt attacker controlled text with ECB. Anything else encrypted with this key is decryptable/encryptable.<br /><br />" + blob
+
+                            detail = "The application appears to encrypt attacker controlled text with ECB. The following blob is found in a response with a long repeating parameter. It appears to be encoded as " 
+                            detail += self.encoding[0] +" and have repeating blocks. Anything else encrypted with this key would be decryptable/encryptable.<br /><br />"
+                            detail += "New Input (plaintext): " + "G" * 96 + "<br />New " + self.encoding[0] + " blob in resp with repeating blocks: " + blob
                             issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "ECB with Attacker input",  detail, "Firm", "High")
                             issues.append(issue)
 
