@@ -58,7 +58,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
     #TODO error if try to do two attacks at once
     def cancelAttack(self, stuff):
-        self.cancel = True
+        self.attackInProgress = False
         return
  
     def decodeBlob(self, blob):
@@ -101,8 +101,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         resp = self._callbacks.makeHttpRequest(self.host, self.port, self.useHTTPS, newReq)
         return resp
 
+
     def paddingDecryptAttack(self, stuff):
-        self.cancel = False
+        if self.attackInProgress:
+            self.paddingDecryptOutput("Error: attack already in progress.\n")
+            self.paddingDecryptOutput("Stopping all attacks\n")
+            self.attackInProgress = False
+            return
+        self.attackInProgress = True
         req = self._helpers.bytesToString(self._decRequestViewer.getText())
         blobstartindex, blobendindex = self.getBlobIndex(req)
         blob = req[blobstartindex : blobendindex]
@@ -125,7 +131,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def paddingEncryptAttack(self, stuff):
-        self.cancel = False
+        if self.attackInProgress:
+            self.paddingDecryptOutput("Error: attack already in progress.\n")
+            self.paddingDecryptOutput("Stopping all attacks\n")
+            self.attackInProgress = False
+            return
+        self.attackInProgress = True
         req = self._helpers.bytesToString(self._encRequestViewer.getText())
         plainstartindex, plainendindex = self.getBlobIndex(req)
         blob = req[plainstartindex : plainendindex]
@@ -154,7 +165,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def ecbDecryptAttack(self, stuff):
-        self.cancel = False
+        if self.attackInProgress:
+            self.paddingDecryptOutput("Error: attack already in progress.\n")
+            self.paddingDecryptOutput("Stopping all attacks\n")
+            self.attackInProgress = False
+            return
+        self.attackInProgress = True
         self.initReqConfig()
         initReq = self._helpers.bytesToString(self._ecbDecRequestViewer.getText())
         blobstartindex, blobendindex = self.getBlobIndex(initReq)
@@ -259,7 +275,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         for block in range(lastRepeatedBlockIndex+1, len(blocks)):
             for byte in range(0, self.blocksize):
-                if self.cancel:
+                if not self.attackInProgress:
                     break
 
                 tblocks = blocks[:]
@@ -318,7 +334,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._threadLimit_lock = thread.allocate_lock()
 
             for bytenum in range(self.blocksize-1, -1, -1):
-                if self.cancel:
+                if not self.attackInProgress:
                     break
                 self.paddingDecryptOutput(".")
                 iv_block = self._encUpdateIV(self.intermediate, self.blocksize - bytenum)
@@ -416,7 +432,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self._threadLimit_lock = thread.allocate_lock()
 
             for bytenum in range(self.blocksize-1, -1, -1):
-                if self.cancel:
+                if not self.attackInProgress:
                     break
                 self.paddingEncryptOutput(".")
                 iv_block = self._encUpdateIV(self.intermediate, self.blocksize - bytenum)
@@ -627,7 +643,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
      
 
     #uses three requests to guess what errors look like
-    #TODO threading
+    #TODO threading, better testing
     def guessCBCErrorCheck(self, req, blob, output=lambda x:None):
 
         goodResp = self.makeRequest(req, self.encodeBlob(blob))
@@ -654,7 +670,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             output("Guessed Padding Error: status == " + str(padErrorStatus) + "\n")
             return True
 
-        keywords = ["error", "padding error"]
+        keywords = ["error", "padding error", "padding is invalid", "badpaddingexception"]
 
         for word in keywords:
             if word in padErrorResp.lower() and word not in goodResp.lower() and word not in controlResp.lower():
@@ -1050,6 +1066,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.port =None
         self.host = None
         self.useHTTPS = None
+        self.attackInProgress = False
 
         self.addUI()
 
