@@ -653,7 +653,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
      
 
     #uses three requests to guess what errors look like
-    #TODO threading, better testing
     def guessCBCErrorCheck(self, req, blob, output=lambda x:None):
 
         goodResp = self.makeRequest(req, self.encodeBlob(blob))
@@ -680,17 +679,19 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             output("Guessed Padding Error: status == " + str(padErrorStatus) + "\n")
             return True
 
-        keywords = ["error", "padding error", "padding is invalid", "badpaddingexception"]
+        keywords = ["padding error", "padding is invalid", "badpaddingexception", "error"]
+
+        spadErrorResp = self._helpers.bytesToString(padErrorResp).lower()
+        sgoodResp = self._helpers.bytesToString(goodResp).lower()
+        scontrolResp = self._helpers.bytesToString(controlResp).lower()
 
         for word in keywords:
-            if word in padErrorResp.lower() and word not in goodResp.lower() and word not in controlResp.lower():
+            if word in spadErrorResp and word not in sgoodResp and word not in scontrolResp:
                 self.cbcErrors.append(("Contains String", word))    
                 output("Guessed Padding Error: contains string == " + word + "\n")
                 return True
 
         return False
-
-
 
 
     def createMenuItems(self, invocation):
@@ -704,6 +705,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             menu.append(swing.JMenuItem("Crypto Attacker", None, actionPerformed=lambda x, inv=invocation: self.sendToTab(inv)))
 
         return menu if menu else None
+
 
     def sendToTab(self, invocation):
 
@@ -1138,8 +1140,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         rblob = self.decodeBlob(blob)
                         if self.ecbGetBlocksize(rblob) != -1:
                             reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
-                            #TODO highlight blob in response
-
                             reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
 
                             detail = "The application appears to encrypt attacker controlled text with ECB. The following blob is found in a response with a long repeating parameter. It appears to be encoded as " 
@@ -1151,7 +1151,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return issues
 
     def detectPaddingOracle(self, baseRequestResponse, insertionPoint):
-        #TODO add 256 requests and make sure?
         blob = insertionPoint.getBaseValue()
         if blob == "":
             return False
@@ -1164,13 +1163,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         req = insertionPoint.buildRequest(self._helpers.stringToBytes(payload))
         req = self._helpers.bytesToString(req).replace(tmark, u"\u00a7")
 
-        #TODO get rid of output
-        if not self.initConfig(req, blob, sys.stdout.write, "cbcscan"):
+        if not self.initConfig(req, blob):
             return False
         return True
 
-    #TODO returns length of the block if it repeats, else returns -1
-    #TODO rename to something like ecbGetBlocksize
     def ecbGetBlocksize(self, blob):
         datasplit = []
         elem = ""
@@ -1179,15 +1175,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if len(elem) % 8 == 0:
                 datasplit.append(elem)
                 elem = ""
-        for b in datasplit:
-            if datasplit.count(b) > 1:
-                return 16 #TODO no, calculate length - for now just do 16
+
+
+        for i in range(0, len(datasplit)):
+            if datasplit.count(datasplit[i]) > 1:
+                return 16
+                #separate for loop because this is slower than count (and has to run much less often I think)
+                for j in range(i+1, len(datasplit)):
+                    if datasplit[i]== datasplit[j]:
+                        return (j-i) * 8
         return -1
 
 
     #Given a new response, reqturns the blob of enc(something | controlled | something)
     #TODO needs to respect config options
-    #TODO use this in the scanner so only have to write once
     def extractRepeatingBlock(self, initResp, newResp):
         #todo {16} can be len(longblob) - should configure this better instead of hardcoding 96
         blobRegex = r"[A-Za-z0-9+/=]{96}[A-Za-z0-9+/=]*"
