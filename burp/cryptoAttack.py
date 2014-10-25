@@ -56,7 +56,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return False
         return True
         
-    #TODO error if try to do two attacks at once
     def cancelAttack(self, stuff):
         self.attackInProgress = False
         return
@@ -101,7 +100,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         resp = self._callbacks.makeHttpRequest(self.host, self.port, self.useHTTPS, newReq)
         return resp
 
-
     def paddingDecryptAttack(self, stuff):
         if self.attackInProgress:
             self.paddingDecryptOutput("Error: attack already in progress.\n")
@@ -124,10 +122,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.paddingDecryptOutput(output)
         self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
 
-
-        #TODO can I get rid of this?
         resp = self.makeRequest(req, blob)
-        thread.start_new_thread(self.decryptMessage2, (req, resp, blob))
+        thread.start_new_thread(self.decryptMessage, (req, resp, blob))
         return
 
     def paddingEncryptAttack(self, stuff):
@@ -143,23 +139,27 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         
 
         if not self.initConfig(req, blob, self.paddingEncryptOutput, "cbcattack"):
-            #TODO still need to set stuff, maybe fail if auto
-            self.paddingEncryptOutput("Blob is invalid... continuing anyway")
+            if self.checkConfigSettings():
+                self.paddingEncryptOutput("Blob is invalid... continuing anyway with config settings...\n")
+            else:
+                self.paddingEncryptOutput("Blob is invalid... cannot auto config values without a blob...\n")
+                return
 
         output = "Settings:\n"
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
-        #self._encResponseViewer.setText(output)
         self.paddingEncryptOutput(output)
         self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
 
-        #TODO try/catch error and exit
         if self.plaintextisAsciiHex.isSelected():
-            plaintext = self.plaintextField.getText().decode("hex")
+            try:
+                plaintext = self.plaintextField.getText().decode("hex")
+            except:
+                self.paddingEncryptOutput("Error: could not decode ascii hex as input...\n")
+                return
         else:
             plaintext = self.plaintextField.getText()
 
-        #can I get rid of this TODO
         resp = self.makeRequest(req, "")
         thread.start_new_thread(self.encryptMessage, (req, resp, plaintext))
         return
@@ -309,7 +309,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
 
-    def decryptMessage2(self, initRequest, initResponse, blob):
+    def decryptMessage(self, initRequest, initResponse, blob):
         self.paddingDecryptOutput("Beginning Attack...\n\n")
         
         blob = self.decodeBlob(blob)
@@ -555,6 +555,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return False
         if self.useHTTPS == None:
             self.useHTTPS = self.useHTTPSbutton.isSelected()
+
+    #checks that all settings are ok to go
+    def checkConfigSettings(self, mode="cbc"):
+        if len(self.encoding) == 0:
+            return False
+        if self.blocksize == 1:
+            return False
+        if len(self.cbcErrors) == 0:
+            return False
 
     #mode is "cbcscan", "cbcattack"
     #TODO output on decrypter doesn't work
