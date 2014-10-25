@@ -24,12 +24,6 @@ from burp import IBurpExtender, ITab, IHttpListener, IMessageEditorController, I
 
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory, IScannerCheck):
 
-    def testMode(self):
-        self._CBCErrorTable.setValueAt("Response Status is", 0,0)
-        self._CBCErrorTable.setValueAt("500", 0,1)
-        self._BlobEncodingTable.setValueAt("ASCII Hex", 0,0) 
-        self._blockSizeDropDown.setSelectedIndex(1)
-
     #detect error in response based on configuration 
     def isPaddingError(self, response, goodResponse=None):
         respInfo = self._helpers.analyzeResponse(response)
@@ -180,7 +174,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         initpayload = initReq[blobstartindex : blobendindex]
         initResp = self._helpers.bytesToString(self.makeRequest(initReq, initpayload))
 
-        resp2 = self._helpers.bytesToString(self.makeRequest(initReq, "A" * 96))
+        resp2 = self._helpers.bytesToString(self.makeRequest(initReq, "G" * 96))
         blob = self.extractRepeatingBlock(initResp, resp2)
         self.blocksize = self.ecbGetBlocksize(blob)
 
@@ -240,7 +234,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         #send one less byte until I align with a block
         for i in range(plaintextlen-1, plaintextlen-33, -1):
-            resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * i))
+            resp = self._helpers.bytesToString(self.makeRequest(initRequest, "G" * i))
             blob = self.extractRepeatingBlock(initResponse, resp)
             nblocks = self.splitListToBlocks(blob)
             c = self.getRepBlockCount(nblocks)
@@ -277,7 +271,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 tblocks = blocks[:]
                 reqlen -= 1
                 #build request with one less byte
-                resp = self._helpers.bytesToString(self.makeRequest(initRequest, "A" * reqlen))
+                resp = self._helpers.bytesToString(self.makeRequest(initRequest, "G" * reqlen))
                 blob = self.extractRepeatingBlock(initResponse, resp)
                 nblocks = self.splitListToBlocks(blob)
                 #TODO this could be sped up with freq analysis
@@ -293,8 +287,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     self._threadLimit_lock.release()
 
                     #TODO url encode with helpers doesn't work - bug with Java burp helper
-                    #payload = self._helpers.urlEncode("A" * (plaintextlen - 1) + chr(i))
-                    payload = urllib.quote("A" * reqlen + self._ecbBlockPlaintext + chr(i))
+                    #payload = self._helpers.urlEncode("G" * (plaintextlen - 1) + chr(i))
+                    payload = urllib.quote("G" * reqlen + self._ecbBlockPlaintext + chr(i))
                     thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
 
                 #wait for all threads to return
@@ -533,19 +527,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         try:
             blob.decode("hex")
             self.encoding.append("hex")
+            return True
         except TypeError:
             pass
-        if len(self.encoding) == 0:
-            b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
-            urlregex = "^(%[\w]{2})+$"
-            if re.match(b64regex, blob):
-                if "=" in blob or "/" in blob or (re.match(".*[A-Z].*", blob) and re.match(".*[a-z].*", blob)):
-                    self.encoding.append("base64")
-            elif re.match(urlregex, blob):
-                self.encoding.append("url")
-            else:
-                return False
-        return True
+
+        b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
+        urlregex = "^(%[\w]{2})+$"
+        if re.match(b64regex, blob):
+            if "=" in blob or "/" in blob or (re.match(".*[A-Z].*", blob) and re.match(".*[a-z].*", blob)):
+                self.encoding.append("base64")
+                return True
+        elif re.match(urlregex, blob):
+            self.encoding.append("url")
+            return True
+        return False
 
 
     def initReqConfig(self):
@@ -572,13 +567,12 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if len(self.cbcErrors) == 0:
             return False
 
-    #mode is "cbcscan", "cbcattack"
-    #TODO output on decrypter doesn't work
+    #mode is "cbcscan", "cbcattack" TODO get rid of mode
     def initConfig(self, req, blob, errorOutput=lambda x:None, mode="cbcattack"):
 
         self.initReqConfig()
 
-        if req.count(u"\u00a7") != 2 and mode == "cbcattack":
+        if req.count(u"\u00a7") != 2:
             errorOutput("Error: needs 2 markers")
 
         #get encoding if set to auto, check for errors
@@ -618,7 +612,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             return False
         self.cbcErrors = []
 
-        if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)" and "cbc" in mode:
+        if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)":
             if not self.guessCBCErrorCheck(req, blob, errorOutput):
                 errorOutput("Error: cannot auto detect padding error")
                 return False
@@ -694,7 +688,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 output("Guessed Padding Error: contains string == " + word + "\n")
                 return True
 
-        #TODO play with others - response length a lot bigger or a lot smaller? etc.
         return False
 
 
@@ -715,8 +708,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def sendToTab(self, invocation):
 
         try:
-            #TODO TODO Remove
-            #self.testMode()
 
             parent = self.getUiComponent().getParent()
             parent.setSelectedComponent(self.getUiComponent())
@@ -1103,10 +1094,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo):
         return
 
-
-    #todo - when both set the checks interfere with one another
     def doActiveScan(self, baseRequestResponse, insertionPoint):
-        #TODO consult UI as to whether to check anything
         httpservice = baseRequestResponse.getHttpService()
         self.port = httpservice.getPort()
         self.host = httpservice.getHost()
@@ -1128,34 +1116,35 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "Padding Oracle",  detail, "Firm", "High")
                 issues.append(issue)
 
-            
-
 
         if self.activeScanECB.isSelected():
             #96 is enough for 3 256 bit blocks, and should repeat
             origResp = self._helpers.bytesToString(baseRequestResponse.getResponse())
-            ecbReq = insertionPoint.buildRequest(self._helpers.stringToBytes("A" * 96))
-            #print ecbReq
+            ecbReq = insertionPoint.buildRequest(self._helpers.stringToBytes("G" * 96))
             ecbResp = self._helpers.bytesToString(self._callbacks.makeHttpRequest(httpservice, ecbReq).getResponse())
 
-            #TODO add length check to skip (if ecbResp not longer than origResp)
+            skipECBCheck = False
 
-            blobRegex = r"[A-Za-z0-9+/=]{16}[A-Za-z0-9+/=]*"
+            if len(ecbResp) < len(origResp) + (90*2):
+                skipECBCheck = True
 
-            origRespBlobs = re.findall(blobRegex, origResp)
-            ecbRespBlobs = re.findall(blobRegex, ecbResp)
+            if not skipECBCheck:
+                blobRegex = r"[A-Za-z0-9+/=]{32}[A-Za-z0-9+/=]*"
 
-            for blob in ecbRespBlobs:
-                if blob not in origRespBlobs and self.guessEncoding(blob):
-                    blob = self.decodeBlob(blob)
-                    if self.ecbGetBlocksize(blob) != -1:
-                        reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
-                        #TODO highlight blob in response
-                        reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
-                        detail = "The application appears to encrypt attacker controlled text with ECB. Anything else encrypted with this key is decryptable/encryptable."
-                        issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "ECB with Attacker input",  detail, "Firm", "High")
-                        issues.append(issue)
+                origRespBlobs = re.findall(blobRegex, origResp)
+                ecbRespBlobs = re.findall(blobRegex, ecbResp)
 
+                for blob in ecbRespBlobs:
+                    if blob not in origRespBlobs and self.guessEncoding(blob):
+                        rblob = self.decodeBlob(blob)
+                        if self.ecbGetBlocksize(rblob) != -1:
+                            reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
+                            #TODO highlight blob in response
+
+                            reqresp = self._callbacks.applyMarkers(baseRequestResponse, [insertionPoint.getPayloadOffsets(insertionPoint.getBaseValue())], None)
+                            detail = "The application appears to encrypt attacker controlled text with ECB. Anything else encrypted with this key is decryptable/encryptable.<br /><br />" + blob
+                            issue = CustomScanIssue(httpservice, reqinfo.getUrl(), [reqresp], "ECB with Attacker input",  detail, "Firm", "High")
+                            issues.append(issue)
 
         return issues
 
@@ -1173,6 +1162,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         req = insertionPoint.buildRequest(self._helpers.stringToBytes(payload))
         req = self._helpers.bytesToString(req).replace(tmark, u"\u00a7")
 
+        #TODO get rid of output
         if not self.initConfig(req, blob, sys.stdout.write, "cbcscan"):
             return False
         return True
