@@ -213,14 +213,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         out += "Initial Blob: " + blob
         return out
 
-   #updates the IV based on the found intermediate blocks
-    def _updateIV(self, dec_byte):
-        iv_block = [0x02 for i in range(0,self.blocksize)]
-        i = self.blocksize - 1
-        for inter in self._intermediate:
-            iv_block[i] = inter ^ (self.blocksize - dec_byte + 1)
-            i -=1
-        return iv_block
         
     def splitListToBlocks(self, blob):
         blocks = []
@@ -338,7 +330,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if not self.attackInProgress:
                     break
                 self.paddingDecryptOutput(".")
-                iv_block = self._encUpdateIV(self.intermediate, self.blocksize - bytenum)
+                iv_block = self.updateIV(self.intermediate, self.blocksize - bytenum)
                 self._foundIntermediate = False
 
                 for retry in range(0,2):
@@ -380,7 +372,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                 bytenum -= 1
                                 self.intermediate[bytenum] = padBytes ^ encryptedBlob[block-1][-i-2]
                             shortcutTaken = True
-
                         break
 
             #use the self.intermediate block to update the iv to our desired plaintext
@@ -413,8 +404,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 elem = ""
         return datasplit
 
-    #this may work for decryption to, try to combine later TODO
-    def _encUpdateIV(self, intermediate, padding):
+    #updates the IV based on the found intermediate blocks
+    def updateIV(self, intermediate, padding):
         iv = []
         for i in range(0, self.blocksize):
             iv.append(intermediate[i] ^ padding)
@@ -441,7 +432,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 if not self.attackInProgress:
                     break
                 self.paddingEncryptOutput(".")
-                iv_block = self._encUpdateIV(self.intermediate, self.blocksize - bytenum)
+                iv_block = self.updateIV(self.intermediate, self.blocksize - bytenum)
                 self._foundIntermediate = False
 
                 for retry in range(0,2):
