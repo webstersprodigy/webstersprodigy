@@ -21,7 +21,6 @@ import binascii, thread, time, re, urllib, base64, sys
 from burp import IBurpExtender, ITab, IHttpListener, IMessageEditorController, IContextMenuFactory, IScannerCheck, IScanIssue
 
 
-
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory, IScannerCheck):
 
     #detect error in response based on configuration 
@@ -95,19 +94,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return resp
 
     def paddingDecryptAttack(self, stuff):
+        self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
+
         if self.attackInProgress:
-            self.paddingDecryptOutput("Error: attack already in progress.\n")
-            self.paddingDecryptOutput("Stopping all attacks\n")
-            self.attackInProgress = False
+            self.paddingDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
             return
         self.attackInProgress = True
         req = self._helpers.bytesToString(self._decRequestViewer.getText())
         blobstartindex, blobendindex = self.getBlobIndex(req)
         blob = req[blobstartindex : blobendindex]
 
-
         if not self.initConfig(req, blob, self.paddingDecryptOutput, "cbcattack"):
-            self.paddingDecryptOutput("Unable to continue...")
+            self.paddingDecryptOutput("Unable to continue...\n")
             self.attackInProgress = False
             return
 
@@ -115,17 +113,18 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
         self.paddingDecryptOutput(output)
-        self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
+        
 
         resp = self.makeRequest(req, blob)
         thread.start_new_thread(self.decryptMessage, (req, resp, blob))
         return
 
     def paddingEncryptAttack(self, stuff):
+
+        self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
+
         if self.attackInProgress:
-            self.paddingEncryptOutput("Error: attack already in progress.\n")
-            self.paddingEncryptOutput("Stopping all attacks\n")
-            self.attackInProgress = False
+            self.paddingDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
             return
         self.attackInProgress = True
         req = self._helpers.bytesToString(self._encRequestViewer.getText())
@@ -145,7 +144,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         output += self.prettyPrintSettings(blob)
         output += "\n\n"
         self.paddingEncryptOutput(output)
-        self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
+        
 
         if self.plaintextisAsciiHex.isSelected():
             try:
@@ -156,16 +155,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return
         else:
             plaintext = self.plaintextField.getText()
+            if len(plaintext) == 0:
+                self.paddingEncryptOutput("Error: plaintext is empty. Nothing to encrypt.\n")
+                self.attackInProgress = False
+                return
 
         resp = self.makeRequest(req, "")
         thread.start_new_thread(self.encryptMessage, (req, resp, plaintext))
         return
 
     def ecbDecryptAttack(self, stuff):
+        self.ecbDecBodies.setSelectedComponent(self._ecbDecResponseViewer.getComponent())
+
         if self.attackInProgress:
-            self.ecbDecryptOutput("Error: attack already in progress.\n")
-            self.ecbDecryptOutput("Stopping all attacks\n")
-            self.attackInProgress = False
+            self.paddingDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
             return
         self.attackInProgress = True
         self.initReqConfig()
@@ -179,8 +182,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.blocksize = self.ecbGetBlocksize(blob)
 
         blocks = self.splitListToBlocks(blob)
-
-        self.ecbDecBodies.setSelectedComponent(self._ecbDecResponseViewer.getComponent())
+        
         output = "Settings:\n"
         output += self.prettyPrintSettings(initpayload)
         output += "\n\n"
@@ -562,7 +564,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def checkConfigSettings(self, mode="cbc"):
         if len(self.encoding) == 0:
             return False
-        if self.blocksize == 1:
+        if self.blocksize % 8 != 0:
             return False
         if len(self.cbcErrors) == 0:
             return False
@@ -579,7 +581,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         numEncodings = self._BlobEncodingTable.getRowCount()
 
         if not self.UICheckTableConfigError(self._BlobEncodingTable, numEncodings):
-            errorOutput("Error: cannot select auto encodings as part of a chain")
+            errorOutput("Error: cannot select auto encodings as part of a chain\n")
             return False
         
         self.encoding = []
@@ -602,19 +604,19 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         #sanity check, blocklength is tested for more extensively/specifically below
         if len(blob) % 8 != 0:
-            errorOutput("Error: Invalid blob length")
+            errorOutput("Error: Invalid blob length\n")
             return False
 
         #get CBC error conditions here
         numErrorChecks = self._CBCErrorTable.getRowCount()
         if not self.UICheckTableConfigError(self._CBCErrorTable, numErrorChecks):
-            errorOutput("Error: cannot set Auto Error checking twice in one table")
+            errorOutput("Error: cannot set Auto Error checking twice in one table\n")
             return False
         self.cbcErrors = []
 
         if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)":
             if not self.guessCBCErrorCheck(req, blob, errorOutput):
-                errorOutput("Error: cannot auto detect padding error")
+                errorOutput("Error: cannot auto detect padding error\n")
                 return False
         else:
             numErrorChecks = self._CBCErrorTable.getRowCount()
@@ -623,7 +625,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 checkValue = self._CBCErrorTable.getValueAt(i,1)
                 self.cbcErrors.append((checkType, checkValue))
                 if checkValue == "" or checkType == "":
-                    errorOutput("Error: table value not set")
+                    errorOutput("Error: table value not set\n")
                     return False
 
         #CBC blocklength check
@@ -645,7 +647,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
         if len(blob) % (self.blocksize) != 0:
-            errorOutput("Error: Invalid blob length")
+            errorOutput("Error: Invalid blob length\n")
             return False
 
         #TODO make sure bytes are relatively random, if scanner then fail else warn
@@ -1075,6 +1077,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.port =None
         self.host = None
         self.useHTTPS = None
+        self.blocksize = 1
         self.attackInProgress = False
 
         self.addUI()
