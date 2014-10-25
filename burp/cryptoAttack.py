@@ -313,6 +313,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.paddingDecryptOutput("Beginning Attack...\n\n")
         
         blob = self.decodeBlob(blob)
+        shortcutTaken = False
 
         if self.noIV:
             blob = [0] * self.blocksize + blob[:]
@@ -340,11 +341,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 iv_block = self._encUpdateIV(self.intermediate, self.blocksize - bytenum)
                 self._foundIntermediate = False
 
-                #1/256
                 for retry in range(0,2):
                     for i in range(0,256):
-
-                        #TODO shortcut for the last block - take advantage of the padded bytes 
 
                         while self._threadLimit <= 0:
                             time.sleep(.1)
@@ -366,7 +364,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
                     if not self._foundIntermediate:
                         if retry == 0:
-                            #this might look kludgy, but seems to take care of cases that occur about ~1/256th of the time
+                            #this might look kludgy, but should take care of cases that occur about ~1/256th of the time
                             iv_block[bytenum-1] ^= 0x0f
                         else:
                             iv_block[bytenum] = 0
@@ -375,6 +373,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             self.paddingDecryptOutput("Blob: " + errorBlob + "\n\n")
                             raise Exception("Unable to decrypt byte")
                     else:
+                        #shortcut for the last block - take advantage of the padded bytes 
+                        if not shortcutTaken: 
+                            padBytes = self.intermediate[bytenum] ^ encryptedBlob[block-1][-1]
+                            for i in range(0, padBytes-1):
+                                bytenum -= 1
+                                self.intermediate[bytenum] = padBytes ^ encryptedBlob[block-1][-i-2]
+                            shortcutTaken = True
+
                         break
 
             #use the self.intermediate block to update the iv to our desired plaintext
