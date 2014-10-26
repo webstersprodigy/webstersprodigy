@@ -191,7 +191,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         thread.start_new_thread(self.ecbDecrypt, (initReq, initResp, blocks))
         return
 
-
     def paddingDecryptOutput(self, outStr):
         current = self._helpers.bytesToString(self._decResponseViewer.getText())
         self._decResponseViewer.setText(current + outStr)
