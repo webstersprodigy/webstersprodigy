@@ -21,6 +21,8 @@ import binascii, thread, time, re, urllib, base64, sys
 from burp import IBurpExtender, ITab, IHttpListener, IMessageEditorController, IContextMenuFactory, IScannerCheck, IScanIssue
 
 
+version = .01
+
 class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFactory, IScannerCheck):
 
     #detect error in response based on configuration 
@@ -168,7 +170,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.ecbDecBodies.setSelectedComponent(self._ecbDecResponseViewer.getComponent())
 
         if self.attackInProgress:
-            self.paddingDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
+            self.ecbDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
             return
         self.attackInProgress = True
         self.initReqConfig()
@@ -230,6 +232,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return c
 
     def ecbDecrypt(self, initRequest, initResponse, blocks, plaintextlen=96):
+        self.ecbDecryptOutput("Beginning Attack...\n\n")
+
         #by here I should have all config values (e.g. blocksize, etc.)
         numRepBlocks = self.getRepBlockCount(blocks)
 
@@ -278,6 +282,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #TODO this could be sped up with freq analysis
 
                 self._ecbByteDecrypted = False
+                self._ecbDecChar = ""
                 for i in range(0,256):
                     while self._threadLimit <= 0:
                             time.sleep(.1)
@@ -295,6 +300,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #wait for all threads to return
                 while self._threadLimit != int(self.threadLimit.getText()):
                     time.sleep(.1)
+                self.ecbDecryptOutput(repr(self._ecbDecChar))
+                self._ecbBlockPlaintext += self._ecbDecChar
         self.ecbDecryptOutput("\n\nDone")
 
         self.attackInProgress = False
@@ -490,8 +497,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         tblocks = self.splitListToBlocks(blob)
         
         if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
-            self.ecbDecryptOutput(chr(i))
-            self._ecbBlockPlaintext += chr(i)
+            self._ecbDecChar = chr(i)
             self._ecbByteDecrypted = True
 
         self._threadLimit += 1

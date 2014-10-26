@@ -14,5 +14,5 @@ I only test this on Burp pro latest version and Jython 2.7 (but please report is
 
 #### Changelog
 
-**1.0:**
- - Release
+**0.01:**
+ - Alpha Release
