@@ -111,8 +111,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             self.attackInProgress = False
             return
 
-        output = "Settings:\n"
-        output += self.prettyPrintSettings(blob)
+        output = self.prettyPrintSettings(blob)
         output += "\n\n"
         self.paddingDecryptOutput(output)
         
@@ -142,8 +141,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 self.attackInProgress = False
                 return
 
-        output = "Settings:\n"
-        output += self.prettyPrintSettings(blob)
+        output = self.prettyPrintSettings(blob)
         output += "\n\n"
         self.paddingEncryptOutput(output)
         
@@ -183,10 +181,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         blob = self.extractRepeatingBlock(initResp, resp2)
         self.blocksize = self.ecbGetBlocksize(blob)
 
+        if self.blocksize %8 != 0:
+            self.ecbDecryptOutput("\nError: Could not find repeating block in response\n")
+            return
+
         blocks = self.splitListToBlocks(blob)
         
-        output = "Settings:\n"
-        output += self.prettyPrintSettings(initpayload)
+        output = self.prettyPrintSettings(initpayload, mode="ecb")
         output += "\n\n"
         self.ecbDecryptOutput(output)
 
@@ -205,12 +206,17 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         current = self._helpers.bytesToString(self._ecbDecResponseViewer.getText())
         self._ecbDecResponseViewer.setText(current + outStr)
 
-    def prettyPrintSettings(self, blob):
-        out =  "Host: " + self.host + "\n"
+    def prettyPrintSettings(self, blob, mode="cbc"):
+        out = "\nBegin Haxx0ring\n-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=\n"
+        out += "Host: " + self.host + "\n"
         out += "Port: " + str(self.port) + "\n"
         out += "SSL: " + repr(self.useHTTPS) + "\n"
         out += "Threads: " + self.threadLimit.getText() + "\n"
         out += "Block size: " + str(self.blocksize) + "\n"
+        out += "Encoding: " + " ".join(self.encoding) + "\n"
+        if mode == "cbc":
+            paddingtuples = [a + "==" + b for a,b in self.cbcErrors ]
+            out +=  "Padding Error: " + " && ".join(paddingtuples) + "\n"
         out += "Initial Blob: " + blob
         return out
 
@@ -232,7 +238,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return c
 
     def ecbDecrypt(self, initRequest, initResponse, blocks, plaintextlen=96):
-        self.ecbDecryptOutput("Beginning Attack...\n\n")
+        self.ecbDecryptOutput("Attack in Progress...\n\n")
 
         #by here I should have all config values (e.g. blocksize, etc.)
         numRepBlocks = self.getRepBlockCount(blocks)
@@ -300,16 +306,19 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 #wait for all threads to return
                 while self._threadLimit != int(self.threadLimit.getText()):
                     time.sleep(.1)
-                self.ecbDecryptOutput(repr(self._ecbDecChar))
+                try:
+                    self.ecbDecryptOutput(self._ecbDecChar)
+                except:
+                    self.ecbDecryptOutput(repr(self._ecbDecChar.strip("'")))
                 self._ecbBlockPlaintext += self._ecbDecChar
-        self.ecbDecryptOutput("\n\nDone")
+        self.ecbDecryptOutput("\n\n-=-=-=-=--=-=-=-=-=-=-=-=-=-=-\n\n")
 
         self.attackInProgress = False
         return
 
 
     def decryptMessage(self, initRequest, initResponse, blob):
-        self.paddingDecryptOutput("Beginning Attack...\n\n")
+        self.paddingDecryptOutput("Attack in Progress...\n\n")
         
         blob = self.decodeBlob(blob)
         shortcutTaken = False
@@ -391,6 +400,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.paddingDecryptOutput("\n\nPlaintext (hex): " + fBlob.encode("hex") + "\n")
         self.paddingDecryptOutput("Plaintext: " + repr(fBlob) + "\n")
 
+        self.paddingDecryptOutput("\n\n-=-=-=-=--=-=-=-=-=-=-=-=-=-=-\n\n")
         self.attackInProgress = False
         return
 
@@ -423,7 +433,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
 
     def encryptMessage(self, initRequest, initResponse, plaintext): 
-        self.paddingEncryptOutput("Beginning Attack...\n\n")
+        self.paddingEncryptOutput("Attack in Progress...\n\n")
 
         plaintext = self.split_toblocks(self.pkcs7_pad(plaintext))
 
@@ -484,6 +494,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         fBlob = "".join([self.encodeBlob(block[:]) for block in encryptedBlob])
         self.paddingEncryptOutput("\nFinal Blob: " + fBlob)
+        self.paddingEncryptOutput("\n\n-=-=-=-=--=-=-=-=-=-=-=-=-=-=-\n\n")
 
         self.attackInProgress = False
         return
@@ -594,8 +605,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if not self.guessEncoding(blob):
                 errorOutput("Error: Encoding not set and could not be guessed\n")
                 return False
-            else:
-                errorOutput("Encoding is guessed as: " + self.encoding[0] + "\n")
         else:
             for i in range(0, numEncodings):
                 if self._BlobEncodingTable.getValueAt(i,0) == "ASCII Hex":
@@ -646,7 +655,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                     self.blocksize = 8
                 else:
                     self.blocksize = 16
-            errorOutput("Guessing block size of: " + str(self.blocksize) + "\n")
         else:
             self.blocksize = int(self._blockSizeDropDown.getSelectedItem())/8
 
@@ -683,7 +691,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if padErrorStatus != goodStatus and padErrorStatus != controlStatus:
             #status is padErrorStatus
             self.cbcErrors.append(("Response Status is", str(padErrorStatus)))
-            output("Guessed Padding Error: status == " + str(padErrorStatus) + "\n")
+            #output("Guessed Padding Error: status == " + str(padErrorStatus) + "\n")
             return True
 
         keywords = ["padding error", "padding is invalid", "badpaddingexception", "error"]
@@ -695,7 +703,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         for word in keywords:
             if word in spadErrorResp and word not in sgoodResp and word not in scontrolResp:
                 self.cbcErrors.append(("Contains String", word))    
-                output("Guessed Padding Error: contains string == " + word + "\n")
+                #output("Guessed Padding Error: contains string == " + word + "\n")
                 return True
 
         return False
