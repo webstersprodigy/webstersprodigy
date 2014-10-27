@@ -51,10 +51,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 return False
         return True
         
-    def cancelAttack(self, stuff):
-        self.attackInProgress = False
-        return
- 
     def decodeBlob(self, blob):
         for encoding in self.encoding:
             if encoding == "hex":
@@ -80,6 +76,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 raise Exception("Unsupported format type: " + encoding)
         return blob
 
+    def cancelAttack(self, stuff):
+        self.attackInProgress = False
+        return
+
     def getBlobIndex(self, req):
         blobstartindex = req.find(u"\u00a7") + 1
         blobendindex = blobstartindex + req[blobstartindex:].find(u"\u00a7")
@@ -87,9 +87,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     #TODO make number of tries configurable and add it here
     def makeRequest(self, origReq, cryptoBlob):
-
         blobstartindex, blobendindex = self.getBlobIndex(origReq)
-        
         newReq = origReq[:blobstartindex-1] + cryptoBlob + origReq[blobendindex +1:]
         newReq = self._helpers.stringToBytes(newReq)
         resp = self._callbacks.makeHttpRequest(self.host, self.port, self.useHTTPS, newReq)
@@ -115,7 +113,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         output += "\n\n"
         self.paddingDecryptOutput(output)
         
-
         resp = self.makeRequest(req, blob)
         thread.start_new_thread(self.decryptMessage, (req, resp, blob))
         return
@@ -145,7 +142,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         output += "\n\n"
         self.paddingEncryptOutput(output)
         
-
         if self.plaintextisAsciiHex.isSelected():
             try:
                 plaintext = self.plaintextField.getText().decode("hex")
@@ -220,7 +216,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         out += "Initial Blob: " + blob
         return out
 
-        
     def splitListToBlocks(self, blob):
         blocks = []
         tblock = []
@@ -237,93 +232,13 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if c > 1:
                 return c
 
-    def ecbDecrypt(self, initRequest, initResponse, blocks, plaintextlen=96):
-        self.ecbDecryptOutput("Attack in Progress...\n\n")
-
-        #by here I should have all config values (e.g. blocksize, etc.)
-        numRepBlocks = self.getRepBlockCount(blocks)
-
-        #send one less byte until I align with a block
-        for i in range(plaintextlen-1, plaintextlen-33, -1):
-            resp = self._helpers.bytesToString(self.makeRequest(initRequest, "G" * i))
-            blob = self.extractRepeatingBlock(initResponse, resp)
-            nblocks = self.splitListToBlocks(blob)
-            c = self.getRepBlockCount(nblocks)
-
-            if c < numRepBlocks:
-                plaintextlen = i + 1
-                break
-            blocks = nblocks[:]
-
-        #get lastRepeatedBlockIndex from blocks
-        lastRepeatedBlockIndex = None
-        blocksToDecrypt = []
-        for i in range (0, len(blocks)):
-            lastIndex = len(blocks)- 1 - blocks[::-1].index(blocks[i])
-            #if we are at our repeater block
-            if i != lastIndex:
-                lastRepeatedBlockIndex = lastIndex
-            else:
-                blocksToDecrypt.append((i, blocks[i][:]))
-
-        #for each blockToDecrypt in blocksToDecrypt
-        self._ecbBlockPlaintext = ""
-        self._threadLimit = int(self.threadLimit.getText())
-        self._threadLimit_lock = thread.allocate_lock()
-        
-        
-        reqlen = plaintextlen
-
-        for block in range(lastRepeatedBlockIndex+1, len(blocks)):
-            for byte in range(0, self.blocksize):
-                if not self.attackInProgress:
-                    break
-
-                tblocks = blocks[:]
-                reqlen -= 1
-                #build request with one less byte
-                resp = self._helpers.bytesToString(self.makeRequest(initRequest, "G" * reqlen))
-                blob = self.extractRepeatingBlock(initResponse, resp)
-                nblocks = self.splitListToBlocks(blob)
-                #TODO this could be sped up with freq analysis
-
-                self._ecbByteDecrypted = False
-                self._ecbDecChar = ""
-                for i in range(0,256):
-                    while self._threadLimit <= 0:
-                            time.sleep(.1)
-                    if self._ecbByteDecrypted:
-                        break
-                    self._threadLimit_lock.acquire()
-                    self._threadLimit -= 1
-                    self._threadLimit_lock.release()
-
-                    #TODO url encode with helpers doesn't work - bug with Java burp helper
-                    #payload = self._helpers.urlEncode("G" * (plaintextlen - 1) + chr(i))
-                    payload = urllib.quote("G" * reqlen + self._ecbBlockPlaintext + chr(i))
-                    thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
-
-                #wait for all threads to return
-                while self._threadLimit != int(self.threadLimit.getText()):
-                    time.sleep(.1)
-                try:
-                    self.ecbDecryptOutput(self._ecbDecChar)
-                except:
-                    self.ecbDecryptOutput(repr(self._ecbDecChar.strip("'")))
-                self._ecbBlockPlaintext += self._ecbDecChar
-        self.ecbDecryptOutput("\n\n-=-=-=-=--=-=-=-=-=-=-=-=-=-=-\n\n")
-
-        self.attackInProgress = False
-        return
-
-
     def decryptMessage(self, initRequest, initResponse, blob):
         self.paddingDecryptOutput("Attack in Progress...\n\n")
         
         blob = self.decodeBlob(blob)
         shortcutTaken = False
 
-        if self.noIV:
+        if self.noIVCheckBox.isSelected():
             blob = [0] * self.blocksize + blob[:]
 
         numblocks = len(blob)/self.blocksize
@@ -404,34 +319,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.attackInProgress = False
         return
 
-    
-    def pkcs7_pad(self, mstr):
-        padbytes = self.blocksize - (len(mstr) % self.blocksize)
-        if padbytes == 0:
-            padbytes = self.blocksize
-        return mstr + chr(padbytes) * padbytes
-
-
-    #splits ciphertext into a list of blocks
-    def split_toblocks(self, mstr):
-        datasplit = []
-        elem = ""
-        for i in range(0,len(mstr)):
-            elem += mstr[i]
-            if len(elem) % self.blocksize == 0:
-                datasplit.append(elem)
-                elem = ""
-        return datasplit
-
-    #updates the IV based on the found intermediate blocks
-    def updateIV(self, intermediate, padding):
-        iv = []
-        for i in range(0, self.blocksize):
-            iv.append(intermediate[i] ^ padding)
-        return iv
-
-
-
     def encryptMessage(self, initRequest, initResponse, plaintext): 
         self.paddingEncryptOutput("Attack in Progress...\n\n")
 
@@ -499,21 +386,107 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.attackInProgress = False
         return
 
+    def ecbDecrypt(self, initRequest, initResponse, blocks, plaintextlen=96):
+        self.ecbDecryptOutput("Attack in Progress...\n\n")
 
+        #by here I should have all config values (e.g. blocksize, etc.)
+        numRepBlocks = self.getRepBlockCount(blocks)
 
-    def asyncECBReq(self, initRequest, initResponse, payload, nblocks, lastRepeatedBlockIndex, i):
-        resp = self._helpers.bytesToString(self.makeRequest(initRequest, payload ))
-        self._threadLimit_lock.acquire()
-        blob = self.extractRepeatingBlock(initResponse[:], resp[:])
-        tblocks = self.splitListToBlocks(blob)
+        #send one less byte until I align with a block
+        for i in range(plaintextlen-1, plaintextlen-33, -1):
+            resp = self._helpers.bytesToString(self.makeRequest(initRequest, "G" * i))
+            blob = self.extractRepeatingBlock(initResponse, resp)
+            nblocks = self.splitListToBlocks(blob)
+            c = self.getRepBlockCount(nblocks)
+
+            if c < numRepBlocks:
+                plaintextlen = i + 1
+                break
+            blocks = nblocks[:]
+
+        #get lastRepeatedBlockIndex from blocks
+        lastRepeatedBlockIndex = None
+        blocksToDecrypt = []
+        for i in range (0, len(blocks)):
+            lastIndex = len(blocks)- 1 - blocks[::-1].index(blocks[i])
+            #if we are at our repeater block
+            if i != lastIndex:
+                lastRepeatedBlockIndex = lastIndex
+            else:
+                blocksToDecrypt.append((i, blocks[i][:]))
+
+        #for each blockToDecrypt in blocksToDecrypt
+        self._ecbBlockPlaintext = ""
+        self._threadLimit = int(self.threadLimit.getText())
+        self._threadLimit_lock = thread.allocate_lock()
         
-        if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
-            self._ecbDecChar = chr(i)
-            self._ecbByteDecrypted = True
+        reqlen = plaintextlen
 
-        self._threadLimit += 1
-        self._threadLimit_lock.release()
+        for block in range(lastRepeatedBlockIndex+1, len(blocks)):
+            for byte in range(0, self.blocksize):
+                if not self.attackInProgress:
+                    break
+
+                tblocks = blocks[:]
+                reqlen -= 1
+                #build request with one less byte
+                resp = self._helpers.bytesToString(self.makeRequest(initRequest, "G" * reqlen))
+                blob = self.extractRepeatingBlock(initResponse, resp)
+                nblocks = self.splitListToBlocks(blob)
+                #TODO this could be sped up with freq analysis
+
+                self._ecbByteDecrypted = False
+                self._ecbDecChar = ""
+                for i in range(0,256):
+                    while self._threadLimit <= 0:
+                            time.sleep(.1)
+                    if self._ecbByteDecrypted:
+                        break
+                    self._threadLimit_lock.acquire()
+                    self._threadLimit -= 1
+                    self._threadLimit_lock.release()
+
+                    #url encode with helpers doesn't work - bug with Java burp helper
+                    #payload = self._helpers.urlEncode("G" * (plaintextlen - 1) + chr(i))
+                    payload = urllib.quote("G" * reqlen + self._ecbBlockPlaintext + chr(i))
+                    thread.start_new_thread(self.asyncECBReq, (initRequest[:], initResponse[:], payload[:], nblocks[:], lastRepeatedBlockIndex, i))
+
+                #wait for all threads to return
+                while self._threadLimit != int(self.threadLimit.getText()):
+                    time.sleep(.1)
+                try:
+                    self.ecbDecryptOutput(self._ecbDecChar)
+                except:
+                    self.ecbDecryptOutput(repr(self._ecbDecChar.strip("'")))
+                self._ecbBlockPlaintext += self._ecbDecChar
+        self.ecbDecryptOutput("\n\n-=-=-=-=--=-=-=-=-=-=-=-=-=-=-\n\n")
+
+        self.attackInProgress = False
         return
+    
+    def pkcs7_pad(self, mstr):
+        padbytes = self.blocksize - (len(mstr) % self.blocksize)
+        if padbytes == 0:
+            padbytes = self.blocksize
+        return mstr + chr(padbytes) * padbytes
+
+    #splits ciphertext into a list of blocks
+    def split_toblocks(self, mstr):
+        datasplit = []
+        elem = ""
+        for i in range(0,len(mstr)):
+            elem += mstr[i]
+            if len(elem) % self.blocksize == 0:
+                datasplit.append(elem)
+                elem = ""
+        return datasplit
+
+    #updates the IV based on the found intermediate blocks
+    def updateIV(self, intermediate, padding):
+        iv = []
+        for i in range(0, self.blocksize):
+            iv.append(intermediate[i] ^ padding)
+        return iv
 
     def asyncReq(self, initRequest, iv_block, c_block, initResponse, byte_val, i):
         blob = self.encodeBlob(iv_block + c_block)
@@ -534,6 +507,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._threadLimit += 1
         self._threadLimit_lock.release()
 
+    def asyncECBReq(self, initRequest, initResponse, payload, nblocks, lastRepeatedBlockIndex, i):
+        resp = self._helpers.bytesToString(self.makeRequest(initRequest, payload ))
+        self._threadLimit_lock.acquire()
+        blob = self.extractRepeatingBlock(initResponse[:], resp[:])
+        tblocks = self.splitListToBlocks(blob)
+        
+        if nblocks[lastRepeatedBlockIndex] == tblocks[lastRepeatedBlockIndex]:
+            self._ecbDecChar = chr(i)
+            self._ecbByteDecrypted = True
+
+        self._threadLimit += 1
+        self._threadLimit_lock.release()
+        return
+
     def UICheckTableConfigError(self, tableobj, numEncodings):
         for i in range(1, numEncodings):
             if tableobj.getValueAt(i,0) == "Auto (heuristics)":
@@ -548,7 +535,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             return True
         except TypeError:
             pass
-
         b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
         urlregex = "^(%[\w]{2})+$"
         if re.match(b64regex, blob):
@@ -560,21 +546,20 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             return True
         return False
 
-
     def initReqConfig(self):
         if self.host == None:
-            self.host = self._hostOption.getText()
+            self.host = self.hostTextBox.getText()
             if self.host == "":
                 errorOutput("Error: Unable to get host")
                 return False
         if self.port == None:
             try:
-                self.port = int(self._miscPort.getText())
+                self.port = int(self.portTextBox.getText())
             except ValueError:
                 errorOutput("Error: Unable to get port")
                 return False
         if self.useHTTPS == None:
-            self.useHTTPS = self.useHTTPSbutton.isSelected()
+            self.useHTTPS = self.useHTTPSCheckBox.isSelected()
 
     #checks that all settings are ok to go
     def checkConfigSettings(self, mode="cbc"):
@@ -594,24 +579,24 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             errorOutput("Error: needs 2 markers")
 
         #get encoding if set to auto, check for errors
-        numEncodings = self._BlobEncodingTable.getRowCount()
+        numEncodings = self.blobEncodingTable.getRowCount()
 
-        if not self.UICheckTableConfigError(self._BlobEncodingTable, numEncodings):
+        if not self.UICheckTableConfigError(self.blobEncodingTable, numEncodings):
             errorOutput("Error: cannot select auto encodings as part of a chain\n")
             return False
         
         self.encoding = []
-        if numEncodings < 1 or (numEncodings == 1 and self._BlobEncodingTable.getValueAt(0,0) == "Auto (heuristics)"):
+        if numEncodings < 1 or (numEncodings == 1 and self.blobEncodingTable.getValueAt(0,0) == "Auto (heuristics)"):
             if not self.guessEncoding(blob):
                 errorOutput("Error: Encoding not set and could not be guessed\n")
                 return False
         else:
             for i in range(0, numEncodings):
-                if self._BlobEncodingTable.getValueAt(i,0) == "ASCII Hex":
+                if self.blobEncodingTable.getValueAt(i,0) == "ASCII Hex":
                     self.encoding.append("hex")
-                elif self._BlobEncodingTable.getValueAt(i,0) == "Base64":
+                elif self.blobEncodingTable.getValueAt(i,0) == "Base64":
                     self.encoding.append("base64")
-                elif self._BlobEncodingTable.getValueAt(i,0) == "URL Encoding":
+                elif self.blobEncodingTable.getValueAt(i,0) == "URL Encoding":
                     self.encoding.append("url")
 
         blob = self.decodeBlob(blob)
@@ -622,21 +607,21 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             return False
 
         #get CBC error conditions here
-        numErrorChecks = self._CBCErrorTable.getRowCount()
-        if not self.UICheckTableConfigError(self._CBCErrorTable, numErrorChecks):
+        numErrorChecks = self.CBCErrorTable.getRowCount()
+        if not self.UICheckTableConfigError(self.CBCErrorTable, numErrorChecks):
             errorOutput("Error: cannot set Auto Error checking twice in one table\n")
             return False
         self.cbcErrors = []
 
-        if self._CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)":
+        if self.CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)":
             if not self.guessCBCErrorCheck(req, blob, errorOutput):
                 errorOutput("Error: cannot auto detect padding error\n")
                 return False
         else:
-            numErrorChecks = self._CBCErrorTable.getRowCount()
+            numErrorChecks = self.CBCErrorTable.getRowCount()
             for error in range(0, numErrorChecks):
-                checkType = self._CBCErrorTable.getValueAt(i,0)
-                checkValue = self._CBCErrorTable.getValueAt(i,1)
+                checkType = self.CBCErrorTable.getValueAt(i,0)
+                checkValue = self.CBCErrorTable.getValueAt(i,1)
                 self.cbcErrors.append((checkType, checkValue))
                 if checkValue == "" or checkType == "":
                     errorOutput("Error: table value not set\n")
@@ -644,7 +629,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         #CBC blocklength check
         #will only detect 128 and 64 bits, Rizzo algorithm
-        if self._blockSizeDropDown.getSelectedItem() == "Auto (heuristics)":
+        if self.blocksizeDropDown.getSelectedItem() == "Auto (heuristics)":
             self.blocksize = 1
             if len(blob) % 16 == 8:
                 self.blocksize = 8
@@ -656,7 +641,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 else:
                     self.blocksize = 16
         else:
-            self.blocksize = int(self._blockSizeDropDown.getSelectedItem())/8
+            self.blocksize = int(self.blocksizeDropDown.getSelectedItem())/8
 
 
         if len(blob) % (self.blocksize) != 0:
@@ -666,7 +651,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         #TODO make sure bytes are relatively random, if scanner then fail else warn
         return True
      
-
     #uses three requests to guess what errors look like
     def guessCBCErrorCheck(self, req, blob, output=lambda x:None):
 
@@ -733,10 +717,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             invMessage = invocation.getSelectedMessages()
             message = invMessage[0]
             service = message.getHttpService()
-            self._hostOption.setText(service.getHost())
-            self._miscPort.setText(str(service.getPort()))
+            self.hostTextBox.setText(service.getHost())
+            self.portTextBox.setText(str(service.getPort()))
             if service.getProtocol() == "https":
-                self.useHTTPSbutton.setSelected(True)
+                self.useHTTPSCheckBox.setSelected(True)
 
 
 
@@ -761,117 +745,111 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         ### main split pane ###
         self._mainPane = swing.JTabbedPane()
 
-        #should mostly be able to copy this https://www.codewatch.org/blog/?p=402
-
         #Create Elements
-        self._miscTextHeading = swing.JLabel()
-        self._miscTextHeading.setText("<html><h2>General</h2></html>")
-        self._hostOptionText = swing.JLabel()
-        self._hostOptionText.setText("Host:")
-        self._hostOption = swing.JTextField()
-        self._miscPortText = swing.JLabel()
-        self._miscPortText.setText("Port:")
-        self._miscPort = swing.JTextField()
-        self.useHTTPSbutton = swing.JCheckBox('Use HTTPS')
-        self.noIV = swing.JCheckBox('no IV (CBC Decrypt only)')
-        self.noIV.setSelected(True)
-        self._threadLimitText = swing.JLabel()
-        self._threadLimitText.setText("Threads:")
+        miscTextHeading = swing.JLabel()
+        miscTextHeading.setText("<html><h2>General</h2></html>")
+        hostOptionLabel = swing.JLabel()
+        hostOptionLabel.setText("Host:")
+        self.hostTextBox = swing.JTextField()
+        portLabel = swing.JLabel()
+        portLabel.setText("Port:")
+        self.portTextBox = swing.JTextField()
+        self.useHTTPSCheckBox = swing.JCheckBox('Use HTTPS')
+        self.noIVCheckBox = swing.JCheckBox('no IV (CBC Decrypt only)')
+        self.noIVCheckBox.setSelected(True)
+        threadLimitLabel = swing.JLabel()
+        threadLimitLabel.setText("Threads:")
         self.threadLimit = swing.JTextField()
         self.threadLimit.setText("30")
 
-        self._blockSizeText = swing.JLabel()
-        self._blockSizeText.setText("Blocksize:")
-        self._blockSizeDropDown = swing.JComboBox(self.blockSizeOptions)
-        self._jSeparator1 = swing.JSeparator()
+        blocksizeLabel = swing.JLabel()
+        blocksizeLabel.setText("Blocksize:")
+        self.blocksizeDropDown = swing.JComboBox(self.blockSizeOptions)
+        jSeperator1 = swing.JSeparator()
 
-        self._BlobEncodeHeading  = swing.JLabel()
-        self._BlobEncodeHeading.setText("<html><h2>Blob Encoding</h2><p>Configure the type of blob encoding. Multiple Options are stacked (e.g. first ascii then base64)</p></html>")
-        self._BlobEncodingTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)"]], ["Blob Encoding"]))
+        blobEncodeHeading  = swing.JLabel()
+        blobEncodeHeading.setText("<html><h2>Blob Encoding</h2><p>Configure the type of blob encoding. Multiple Options are stacked (e.g. first ascii then base64)</p></html>")
+        self.blobEncodingTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)"]], ["Blob Encoding"]))
         ecodingOptionsCombo = swing.JComboBox(self.encodingTypeOptions)
-        self._BlobEncodingTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(ecodingOptionsCombo))
-        self._blobTablePane = swing.JScrollPane(self._BlobEncodingTable)
+        self.blobEncodingTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(ecodingOptionsCombo))
+        blobTablePane = swing.JScrollPane(self.blobEncodingTable)
         addEncodingButton = swing.JButton('Add Row', actionPerformed=self.UIAddEncodingRow)
         delEncodingButton = swing.JButton('Delete Row', actionPerformed=self.UIDelEncodingRow)
-        self._jSeparator2 = swing.JSeparator()
+        jSeperator2 = swing.JSeparator()
 
-        self._ErrorDetectionHeading  = swing.JLabel()
-        self._ErrorDetectionHeading.setText("<html><h2>CBC Padding Oracle Error Detection</h2><p>The Following are ANDed - if true, the response is considered a padding error</p></html>")
-        self._CBCErrorTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)", ""]], ["Padding Error Detection", "Value"]))
+        errorDetectionHeading  = swing.JLabel()
+        errorDetectionHeading.setText("<html><h2>CBC Padding Oracle Error Detection</h2><p>The Following are ANDed - if true, the response is considered a padding error</p></html>")
+        self.CBCErrorTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)", ""]], ["Padding Error Detection", "Value"]))
         CBCErrorOptionsCombo = swing.JComboBox(self.paddingErrorDetectionOptions)
-        self._CBCErrorTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(CBCErrorOptionsCombo))
-        self._CBCErrorTablePane = swing.JScrollPane(self._CBCErrorTable)
+        self.CBCErrorTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(CBCErrorOptionsCombo))
+        self.CBCErrorTablePane = swing.JScrollPane(self.CBCErrorTable)
         addPadErrorButton = swing.JButton('Add Row', actionPerformed=self.UIAddPaddingRow)
         delPadErrorButton = swing.JButton('Delete Row', actionPerformed=self.UIDelPaddingRow)
 
-        _jSeparator3 = swing.JSeparator()
+        jSeperator3 = swing.JSeparator()
 
-
-
-        _activeScanText = swing.JLabel()
-        _activeScanText.setText("<html><h2>Active Scan Checks</h2><p>This will check for Crypto attacks using heuristics at all active scan insertion points</p></html>")
+        activeScanHeading = swing.JLabel()
+        activeScanHeading.setText("<html><h2>Active Scan Checks</h2><p>This will check for Crypto attacks using heuristics at all active scan insertion points</p></html>")
 
         self.activeScanPaddingOracle = swing.JCheckBox('Padding Oracle')
         self.activeScanPaddingOracle.setSelected(True)
         self.activeScanECB = swing.JCheckBox('ECB')
         self.activeScanECB.setSelected(True)
 
-
         #Position elements - x,y,width,height
-        self._miscTextHeading.setBounds(13,10,800,40)
-        self._hostOptionText.setBounds(15, 50, 60, 30)
-        self._hostOption.setBounds(95, 50, 250, 30)
-        self._miscPortText.setBounds(15, 95, 60, 30)
-        self._miscPort.setBounds(95, 95, 75, 30)
-        self.useHTTPSbutton.setBounds(200, 95, 125, 30)
-        self.noIV.setBounds(200, 140, 225, 30)
-        self._threadLimitText.setBounds(15, 140, 60, 30)
+        miscTextHeading.setBounds(13,10,800,40)
+        hostOptionLabel.setBounds(15, 50, 60, 30)
+        self.hostTextBox.setBounds(95, 50, 250, 30)
+        portLabel.setBounds(15, 95, 60, 30)
+        self.portTextBox.setBounds(95, 95, 75, 30)
+        self.useHTTPSCheckBox.setBounds(200, 95, 125, 30)
+        self.noIVCheckBox.setBounds(200, 140, 225, 30)
+        threadLimitLabel.setBounds(15, 140, 60, 30)
         self.threadLimit.setBounds(95, 140, 75, 30)
-        self._blockSizeText.setBounds(15, 185, 85, 30)
-        self._blockSizeDropDown.setBounds(95, 185, 160, 30)
-        self._jSeparator1.setBounds(15, 235, 1200, 5)
-        self._BlobEncodeHeading.setBounds(13,235,800,80)
-        self._blobTablePane.setBounds(15, 325, 500, 100)
+        blocksizeLabel.setBounds(15, 185, 85, 30)
+        self.blocksizeDropDown.setBounds(95, 185, 160, 30)
+        jSeperator1.setBounds(15, 235, 1200, 5)
+        blobEncodeHeading.setBounds(13,235,800,80)
+        blobTablePane.setBounds(15, 325, 500, 100)
         addEncodingButton.setBounds(540, 330, 95, 30)
         delEncodingButton.setBounds(540, 365, 95, 30)
-        self._jSeparator2.setBounds(15, 455, 1200, 5)
-        self._ErrorDetectionHeading.setBounds(13,455,800,80)
-        self._CBCErrorTablePane.setBounds(15, 545, 600, 150)
+        jSeperator2.setBounds(15, 455, 1200, 5)
+        errorDetectionHeading.setBounds(13,455,800,80)
+        self.CBCErrorTablePane.setBounds(15, 545, 600, 150)
         addPadErrorButton.setBounds(640, 550, 95, 30)
         delPadErrorButton.setBounds(640, 585, 95, 30)
-        _jSeparator3.setBounds(15, 720, 1200, 5)
-        _activeScanText.setBounds(13, 720, 800, 80)
+        jSeperator3.setBounds(15, 720, 1200, 5)
+        activeScanHeading.setBounds(13, 720, 800, 80)
         self.activeScanPaddingOracle.setBounds(15, 820, 150, 30)
         self.activeScanECB.setBounds(180, 820, 200, 30)
-
 
         self._optionsTab = swing.JPanel()
         self._optionsTab.setLayout(None)
 
         self._optionsTab.setPreferredSize(awt.Dimension(1000,1000))
-        self._optionsTab.add(self._miscTextHeading)
-        self._optionsTab.add(self._hostOption)
-        self._optionsTab.add(self._hostOptionText)
-        self._optionsTab.add(self._miscPortText)
-        self._optionsTab.add(self._miscPort)
-        self._optionsTab.add(self.useHTTPSbutton)
-        self._optionsTab.add(self.noIV)
-        self._optionsTab.add(self._threadLimitText)
+        self._optionsTab.add(miscTextHeading)
+        self._optionsTab.add(self.hostTextBox)
+        self._optionsTab.add(hostOptionLabel)
+        self._optionsTab.add(portLabel)
+        self._optionsTab.add(self.portTextBox)
+        self._optionsTab.add(self.useHTTPSCheckBox)
+        self._optionsTab.add(self.noIVCheckBox)
+        self._optionsTab.add(threadLimitLabel)
         self._optionsTab.add(self.threadLimit)
-        self._optionsTab.add(self._blockSizeText)
-        self._optionsTab.add(self._blockSizeDropDown)
-        self._optionsTab.add(self._jSeparator1)
-        self._optionsTab.add(self._BlobEncodeHeading)
-        self._optionsTab.add(self._blobTablePane)
+        self._optionsTab.add(blocksizeLabel)
+        self._optionsTab.add(self.blocksizeDropDown)
+        self._optionsTab.add(jSeperator1)
+        self._optionsTab.add(blobEncodeHeading)
+        self._optionsTab.add(blobTablePane)
         self._optionsTab.add(addEncodingButton)
         self._optionsTab.add(delEncodingButton)
-        self._optionsTab.add(self._jSeparator2)
-        self._optionsTab.add(self._ErrorDetectionHeading)
-        self._optionsTab.add(self._CBCErrorTablePane)
+        self._optionsTab.add(jSeperator2)
+        self._optionsTab.add(errorDetectionHeading)
+        self._optionsTab.add(self.CBCErrorTablePane)
         self._optionsTab.add(addPadErrorButton)
         self._optionsTab.add(delPadErrorButton)
-        self._optionsTab.add(_jSeparator3)
-        self._optionsTab.add(_activeScanText)
+        self._optionsTab.add(jSeperator3)
+        self._optionsTab.add(activeScanHeading)
         self._optionsTab.add(self.activeScanPaddingOracle)
         self._optionsTab.add(self.activeScanECB)
 
@@ -881,7 +859,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         #self._mainPane.addTab("Config", self._optionsTab)
         self._mainPane.addTab("Config", self._optionsScrollPanel)     
-
 
         ### Decrypt Padding Oracle Tab ###
         self._decryptTab = swing.JSplitPane(swing.JSplitPane.VERTICAL_SPLIT)
@@ -894,12 +871,10 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         decryptAttackButton = swing.JButton("Attack", actionPerformed=self.paddingDecryptAttack)
         cancelAttackButton = swing.JButton("Stop", actionPerformed=self.cancelAttack)
     
-
         decryptButtons.add(decryptAddMarkButton)
         decryptButtons.add(decryptClearMarksButton)
         decryptButtons.add(decryptAttackButton)
         decryptButtons.add(cancelAttackButton)
-
 
         self.decryptBodies = swing.JTabbedPane()
         self._decRequestViewer = self._callbacks.createTextEditor()
@@ -911,10 +886,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.decryptBodies.addTab("Output", self._decResponseViewer.getComponent())
         self._decryptTab.setRightComponent(self.decryptBodies)
 
-
-
         self._mainPane.addTab("CBC Decrypt", self._decryptTab)
-
 
         ### Encrypt Padding Oracle Tab ###
         self._encryptTab = swing.JSplitPane(swing.JSplitPane.VERTICAL_SPLIT)
@@ -926,7 +898,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         toprow.setLayout(awt.FlowLayout(awt.FlowLayout.LEADING, 5, 10))
         botrow.setLayout(awt.FlowLayout(awt.FlowLayout.LEADING, 5, 10))
-        
         
         encryptAddMarkButton = swing.JButton(u"Add \u00a7", actionPerformed=self.UICbcEncAddPressed)
         encryptClearMarksButton = swing.JButton(u'Clear \u00a7', actionPerformed=self.UICbcEncClearPressed)
@@ -952,7 +923,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         self._encryptTab.setLeftComponent(encryptButtons)
 
-
         self.encryptBodies = swing.JTabbedPane()
         self._encRequestViewer = self._callbacks.createTextEditor()
         self._encResponseViewer = self._callbacks.createTextEditor()
@@ -965,7 +935,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         self._mainPane.addTab("CBC Encrypt", self._encryptTab)
 
-
         ### ECB Decrypt Tab ###
         self._ecbDecTab = swing.JSplitPane(swing.JSplitPane.VERTICAL_SPLIT)
 
@@ -976,13 +945,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         ecbDecClearMarksButton = swing.JButton(u'Clear \u00a7', actionPerformed=self.UIecbDecClearPressed)
         ecbDecAttackButton = swing.JButton("Attack", actionPerformed=self.ecbDecryptAttack) 
         cancelAttackButton = swing.JButton("Stop", actionPerformed=self.cancelAttack)
-    
 
         ecbDecButtons.add(ecbDecAddMarkButton)
         ecbDecButtons.add(ecbDecClearMarksButton)
         ecbDecButtons.add(ecbDecAttackButton)
         ecbDecButtons.add(cancelAttackButton)
-
 
         self.ecbDecBodies = swing.JTabbedPane()
         self._ecbDecRequestViewer = self._callbacks.createTextEditor()
@@ -996,8 +963,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         self._mainPane.addTab("ECB Decrypt", self._ecbDecTab)
 
-
-        
         subPane = swing.JSplitPane(swing.JSplitPane.HORIZONTAL_SPLIT)
         reqPane = swing.JPanel()
         reqEditor = self._callbacks.createTextEditor()
@@ -1008,7 +973,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         # customize our UI components
         self._callbacks.customizeUiComponent(self._mainPane)
         self._callbacks.customizeUiComponent(self._optionsTab)
-        self._callbacks.customizeUiComponent(self._BlobEncodingTable)
+        self._callbacks.customizeUiComponent(self.blobEncodingTable)
         
         # add the custom tab to Burp's UI
         self._callbacks.addSuiteTab(self)
@@ -1051,15 +1016,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def UIAddEncodingRow(self, stuff):
-        model =  self._BlobEncodingTable.getModel()
-        #count = self._BlobEncodingTable.getRowCount()
+        model =  self.blobEncodingTable.getModel()
+        #count = self.blobEncodingTable.getRowCount()
         model.addRow(["Auto (heuristics)"])
         return
 
     def UIDelEncodingRow(self, stuff):
-        model =  self._BlobEncodingTable.getModel()
-        count = self._BlobEncodingTable.getRowCount()
-        row = self._BlobEncodingTable.getSelectedRow()
+        model =  self.blobEncodingTable.getModel()
+        count = self.blobEncodingTable.getRowCount()
+        row = self.blobEncodingTable.getSelectedRow()
         if row != -1:
             model.removeRow(row)
         elif count >= 1:
@@ -1067,14 +1032,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def UIAddPaddingRow(self, stuff):
-        model =  self._CBCErrorTable.getModel()
+        model =  self.CBCErrorTable.getModel()
         model.addRow(["Auto (heuristics)"])
         return
 
     def UIDelPaddingRow(self, stuff):
-        model =  self._CBCErrorTable.getModel()
-        count = self._CBCErrorTable.getRowCount()
-        row = self._CBCErrorTable.getSelectedRow()
+        model =  self.CBCErrorTable.getModel()
+        count = self.CBCErrorTable.getRowCount()
+        row = self.CBCErrorTable.getSelectedRow()
         if row != -1:
             model.removeRow(row)
         elif count >= 1:
