@@ -166,6 +166,11 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if self.attackInProgress:
             self.ecbDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
             return
+
+        if req.count(u"\u00a7") != 2:
+            self.ecbDecryptOutput("Error: needs 2 markers")
+            return
+            
         self.attackInProgress = True
         self.initReqConfig()
         initReq = self._helpers.bytesToString(self._ecbDecRequestViewer.getText())
