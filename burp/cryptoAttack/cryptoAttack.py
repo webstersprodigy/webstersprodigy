@@ -1050,7 +1050,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
     def registerExtenderCallbacks(self, callbacks):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
-        callbacks.setExtensionName("Crypto Attacks")
+        callbacks.setExtensionName("Crypto Attacker")
         
         self.port =None
         self.host = None
