@@ -64,8 +64,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return [ord(ch) for ch in blob]
 
     def encodeBlob(self, byteblob):
-        blob = "".join([chr(a) for a in byteblob])
-        for encoding in self.encoding:
+        
+        if len(self.revEncoding) == 0:
+            self.revEncoding = self.encoding[:]
+            self.revEncoding.reverse()
+
+        blob = "".join([chr(a) for a in byteblob])  
+
+        for encoding in self.revEncoding:
             if encoding == "hex":
                 blob = blob.encode("hex")
             elif encoding == "base64":
@@ -114,6 +120,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.paddingDecryptOutput(output)
         
         resp = self.makeRequest(req, blob)
+
         thread.start_new_thread(self.decryptMessage, (req, resp, blob))
         return
 
@@ -298,8 +305,9 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             iv_block[bytenum] = 0
                             errorBlob = self.encodeBlob(iv_block[:] + encryptedBlob[block][:])
                             self.paddingDecryptOutput("ERROR: Unable to decrypt byte " + str(bytenum) + "\n\n")
-                            self.paddingDecryptOutput("Blob: " + errorBlob + "\n\n")
-                            raise Exception("Unable to decrypt byte")
+                            self.paddingDecryptOutput("Stuck Blob: " + errorBlob + "\n\n")
+                            #TODO self.paddingDecryptOutput("Hex Blob: " + binascii.hexlify("".join(iv_block[:] + encryptedBlob[block][:])) + "\n\n")
+                            self.attackInProgress = False
                     else:
                         #shortcut for the last block - take advantage of the padded bytes 
                         if not shortcutTaken: 
@@ -374,8 +382,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                             iv_block[bytenum] = 0
                             errorBlob = self.encodeBlob(iv_block[:] + encryptedBlob[block][:])
                             self.paddingEncryptOutput("ERROR: Unable to decrypt byte " + str(bytenum) + "\n\n")
-                            self.paddingEncryptOutput("Blob: " + errorBlob + "\n\n")
-                            raise Exception("Unable to decrypt byte")
+                            self.paddingEncryptOutput("Stuck Blob: " + errorBlob + "\n\n")
+                            self.attackInProgress = False
                     else:
                         break
 
@@ -384,7 +392,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             for i in range(0,self.blocksize):
                 encryptedBlob[block][i] = self.intermediate[i] ^ ord(plaintext[block][i])
 
-        fBlob = "".join([self.encodeBlob(block[:]) for block in encryptedBlob])
+        #flatten array
+        fBlob = self.encodeBlob([item for sublist in encryptedBlob for item in sublist])
         self.paddingEncryptOutput("\nFinal Blob: " + fBlob)
         self.paddingEncryptOutput("\n\n-=-=-=-=--=-=-=-=-=-=-=-=-=-=-\n\n")
 
@@ -533,17 +542,22 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return True
 
     def guessEncoding(self, blob):
-        self.encoding = []
         try:
             blob.decode("hex")
             self.encoding.append("hex")
             return True
         except TypeError:
             pass
+        urlDecBlob = urllib.unquote(blob)
         b64regex = "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$"
         urlregex = "^(%[\w]{2})+$"
         if re.match(b64regex, blob):
             if "=" in blob or "/" in blob or (re.match(".*[A-Z].*", blob) and re.match(".*[a-z].*", blob)):
+                self.encoding.append("base64")
+                return True
+        elif re.match(b64regex, urlDecBlob):
+            if "=" in urlDecBlob or "/" in urlDecBlob or (re.match(".*[A-Z].*", urlDecBlob) and re.match(".*[a-z].*", urlDecBlob)):
+                self.encoding.append("url")
                 self.encoding.append("base64")
                 return True
         elif re.match(urlregex, blob):
@@ -590,7 +604,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             errorOutput("Error: cannot select auto encodings as part of a chain\n")
             return False
         
-        self.encoding = []
         if numEncodings < 1 or (numEncodings == 1 and self.blobEncodingTable.getValueAt(0,0) == "Auto (heuristics)"):
             if not self.guessEncoding(blob):
                 errorOutput("Error: Encoding not set and could not be guessed\n")
@@ -625,8 +638,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         else:
             numErrorChecks = self.CBCErrorTable.getRowCount()
             for error in range(0, numErrorChecks):
-                checkType = self.CBCErrorTable.getValueAt(i,0)
-                checkValue = self.CBCErrorTable.getValueAt(i,1)
+                checkType = self.CBCErrorTable.getValueAt(error,0)
+                checkValue = self.CBCErrorTable.getValueAt(error,1)
                 self.cbcErrors.append((checkType, checkValue))
                 if checkValue == "" or checkType == "":
                     errorOutput("Error: table value not set\n")
@@ -1062,6 +1075,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.useHTTPS = None
         self.blocksize = 1
         self.attackInProgress = False
+        self.encoding = []
+        self.revEncoding = []
 
         self.addUI()
 
