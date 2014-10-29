@@ -101,6 +101,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def paddingDecryptAttack(self, stuff):
         self.decryptBodies.setSelectedComponent(self._decResponseViewer.getComponent())
+        self.resetValues()
 
         if self.attackInProgress:
             self.paddingDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
@@ -125,7 +126,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def paddingEncryptAttack(self, stuff):
-
+        self.resetValues()
         self.encryptBodies.setSelectedComponent(self._encResponseViewer.getComponent())
 
         if self.attackInProgress:
@@ -168,6 +169,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def ecbDecryptAttack(self, stuff):
+        self.resetValues()
         self.ecbDecBodies.setSelectedComponent(self._ecbDecResponseViewer.getComponent())
 
         if self.attackInProgress:
@@ -1069,14 +1071,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         callbacks.setExtensionName("Crypto Attacker")
-        
-        self.port =None
-        self.host = None
-        self.useHTTPS = None
-        self.blocksize = 1
-        self.attackInProgress = False
-        self.encoding = []
-        self.revEncoding = []
 
         self.addUI()
 
@@ -1085,6 +1079,14 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         return
         
+    def resetValues(self):
+        self.port =None
+        self.host = None
+        self.useHTTPS = None
+        self.blocksize = 1
+        self.attackInProgress = False
+        self.encoding = []
+        self.revEncoding = []
     
     def getTabCaption(self):
         return "Crypto Attacker"
@@ -1097,6 +1099,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return
 
     def doActiveScan(self, baseRequestResponse, insertionPoint):
+        self.resetValues()
         httpservice = baseRequestResponse.getHttpService()
         self.port = httpservice.getPort()
         self.host = httpservice.getHost()
