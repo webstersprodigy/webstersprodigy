@@ -291,8 +291,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                         self._threadLimit_lock.release()
 
                         iv_block[bytenum] = i
-                        blob = self.encodeBlob(iv_block[:] + encryptedBlob[block][:])
 
+                        blob = self.encodeBlob(iv_block[:] + encryptedBlob[block][:])
                         thread.start_new_thread(self.asyncReq, (initRequest, iv_block[:], encryptedBlob[block][:], initResponse, bytenum, i))
 
                     #wait for all threads to return
@@ -318,8 +318,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                                 bytenum -= 1
                                 self.intermediate[bytenum] = padBytes ^ encryptedBlob[block-1][-i-2]
                             shortcutTaken = True
-                        break
-
+                        break      
             #use the self.intermediate block to update the iv to our desired plaintext
             tmp = []
             for i in range(0,self.blocksize):
@@ -635,7 +634,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         if self.CBCErrorTable.getValueAt(0,0) == "Auto (heuristics)":
             if not self.guessCBCErrorCheck(req, blob, errorOutput):
-                errorOutput("Error: cannot auto detect padding error\n")
+                errorOutput("Error: cannot auto detect padding error - please set manually\n")
                 return False
         else:
             numErrorChecks = self.CBCErrorTable.getRowCount()
@@ -709,7 +708,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 self.cbcErrors.append(("Contains String", word))    
                 #output("Guessed Padding Error: contains string == " + word + "\n")
                 return True
-
         return False
 
 
@@ -788,7 +786,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         jSeperator1 = swing.JSeparator()
 
         blobEncodeHeading  = swing.JLabel()
-        blobEncodeHeading.setText("<html><h2>Blob Encoding</h2><p>Configure the type of blob encoding. Multiple Options are stacked (e.g. first ascii then base64)</p></html>")
+        blobEncodeHeading.setText("<html><h2>Blob Encoding</h2><p>Configure the type of blob encoding. Multiple Options are stacked (e.g. To decode first url decode then base64)</p></html>")
         self.blobEncodingTable = swing.JTable(swing.table.DefaultTableModel([["Auto (heuristics)"]], ["Blob Encoding"]))
         ecodingOptionsCombo = swing.JComboBox(self.encodingTypeOptions)
         self.blobEncodingTable.getColumnModel().getColumn(0).setCellEditor(swing.DefaultCellEditor(ecodingOptionsCombo))
