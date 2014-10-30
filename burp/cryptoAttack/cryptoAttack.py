@@ -14,6 +14,7 @@
 # limitations under the License.
 
 
+import java.awt
 from java import awt;
 from javax import swing;
 from javax.swing.table import AbstractTableModel;
