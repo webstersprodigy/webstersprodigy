@@ -175,14 +175,15 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         if self.attackInProgress:
             self.ecbDecryptOutput("\nError: attack already in progress. Please wait for this to finish or stop before beginning new attack.\n")
             return
-
-        if req.count(u"\u00a7") != 2:
-            self.ecbDecryptOutput("Error: needs 2 markers")
-            return
             
         self.attackInProgress = True
         self.initReqConfig()
         initReq = self._helpers.bytesToString(self._ecbDecRequestViewer.getText())
+
+        if initReq.count(u"\u00a7") != 2:
+            self.ecbDecryptOutput("Error: needs 2 markers")
+            return
+
         blobstartindex, blobendindex = self.getBlobIndex(initReq)
         initpayload = initReq[blobstartindex : blobendindex]
         initResp = self._helpers.bytesToString(self.makeRequest(initReq, initpayload))
@@ -543,6 +544,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         return True
 
     def guessEncoding(self, blob):
+        self.encoding = []
+
         try:
             blob.decode("hex")
             self.encoding.append("hex")
@@ -1072,6 +1075,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
         self.addUI()
 
+        self.attackInProgress = False
+
         callbacks.registerContextMenuFactory(self)
         callbacks.registerScannerCheck(self)
 
@@ -1082,7 +1087,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
         self.host = None
         self.useHTTPS = None
         self.blocksize = 1
-        self.attackInProgress = False
         self.encoding = []
         self.revEncoding = []
     
@@ -1098,6 +1102,8 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
 
     def doActiveScan(self, baseRequestResponse, insertionPoint):
         self.resetValues()
+        #TODO there is also a bug in that you can't active scan at the same time as decoding
+
         httpservice = baseRequestResponse.getHttpService()
         self.port = httpservice.getPort()
         self.host = httpservice.getHost()
@@ -1132,7 +1138,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 skipECBCheck = True
 
             if not skipECBCheck:
-                blobRegex = r"[A-Za-z0-9+/=]{32}[A-Za-z0-9+/=]*"
+                blobRegex = r"[A-Za-z0-9+/=]{96}[A-Za-z0-9+/=]*"
 
                 origRespBlobs = re.findall(blobRegex, origResp)
                 ecbRespBlobs = re.findall(blobRegex, ecbResp)
@@ -1177,7 +1183,6 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
             if len(elem) % 8 == 0:
                 datasplit.append(elem)
                 elem = ""
-
 
         for i in range(0, len(datasplit)):
             if datasplit.count(datasplit[i]) > 1:
