@@ -1145,7 +1145,7 @@ class BurpExtender(IBurpExtender, ITab, IMessageEditorController, IContextMenuFa
                 ecbRespBlobs = re.findall(blobRegex, ecbResp)
 
                 for blob in ecbRespBlobs:
-                    if blob not in origRespBlobs and self.guessEncoding(blob):
+                    if blob not in origRespBlobs and self.guessEncoding(blob)  and ("G"*48 not in blob):
                         rblob = self.decodeBlob(blob)
                         if self.ecbGetBlocksize(rblob) != -1:
                             reqinfo = self._helpers.analyzeRequest(baseRequestResponse)
